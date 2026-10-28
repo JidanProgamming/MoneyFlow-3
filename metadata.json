@@ -1,0 +1,8 @@
+{
+  "name": "MoneyFlow",
+  "description": "A startup-ready personal finance app with statistics, Room persistence, and a modern clean UI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
