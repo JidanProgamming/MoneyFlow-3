@@ -374,21 +374,25 @@ fun DashboardScreen(
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         // Action 1: Scan Struk
                         OutlinedButton(
                             onClick = { showScanReceiptDialog = true },
                             modifier = Modifier
                                 .weight(1f)
-                                .height(54.dp)
+                                .height(52.dp)
                                 .testTag("btn_scan_receipt_dashboard"),
                             shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                         ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Text("Pindai Struk", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Pindai Struk", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
 
@@ -397,30 +401,18 @@ fun DashboardScreen(
                             onClick = { showVoiceInputDialog = true },
                             modifier = Modifier
                                 .weight(1f)
-                                .height(54.dp)
+                                .height(52.dp)
                                 .testTag("btn_voice_input_dashboard"),
                             shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                         ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Text("Voice Over", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-
-                        // Action 3: Tanya AI Assistant
-                        Button(
-                            onClick = { navController.navigate("ai_chat") },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(54.dp)
-                                .testTag("btn_ai_chat_dashboard"),
-                            shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.Default.SmartToy, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Text("Tanya AI", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Voice Over", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }

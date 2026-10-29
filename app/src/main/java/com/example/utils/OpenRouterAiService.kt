@@ -24,10 +24,34 @@ data class ParsedReceiptTransaction(
     val date: Long
 )
 
+data class FinancialCategorySpend(
+    val name: String,
+    val amount: Double,
+    val colorHex: Long,
+    val iconType: String // "food", "drink", "transport", "entertainment", "other"
+)
+
+data class FinancialReportData(
+    val title: String = "Berikut laporan keuangan kamu hari ini:",
+    val netIncome: Double = 1250000.0,
+    val incomeChangeText: String = "↑ +12% dari kemarin",
+    val totalExpense: Double = 850000.0,
+    val expenseChangeText: String = "↓ -8% dari kemarin",
+    val categories: List<FinancialCategorySpend> = listOf(
+        FinancialCategorySpend("Makanan", 320000.0, 0xFFFFA500, "food"),
+        FinancialCategorySpend("Minuman", 80000.0, 0xFF38BDF8, "drink"),
+        FinancialCategorySpend("Transportasi", 150000.0, 0xFF10B981, "transport"),
+        FinancialCategorySpend("Hiburan", 100000.0, 0xFFA855F7, "entertainment"),
+        FinancialCategorySpend("Lainnya", 200000.0, 0xFF94A3B8, "other")
+    )
+)
+
 data class ChatMessage(
     val role: String, // "user" or "assistant" or "system"
     val content: String,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val isFinancialReport: Boolean = false,
+    val reportData: FinancialReportData? = null
 )
 
 object OpenRouterAiService {

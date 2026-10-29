@@ -165,7 +165,12 @@ fun VoiceInputDialog(
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
 
-        speechRecognizer?.startListening(intent)
+        try {
+            speechRecognizer?.startListening(intent)
+        } catch (e: Exception) {
+            isListening = false
+            Toast.makeText(context, "Tidak dapat memulai pengenalan suara: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+        }
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
