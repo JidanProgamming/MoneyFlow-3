@@ -52,8 +52,15 @@ fun NavGraph(
         composable("wallet") {
             WalletScreen(navController, financeViewModel)
         }
+        composable("analytics") {
+            AnalyticsScreen(financeViewModel)
+        }
         composable("ai_chat") {
-            AiAssistantChatScreen(financeViewModel, onBack = { navController.popBackStack() })
+            AiAssistantChatScreen(
+                financeViewModel = financeViewModel,
+                onBack = { navController.popBackStack() },
+                onNavigateToAnalytics = { navController.navigate("analytics") }
+            )
         }
     }
 }

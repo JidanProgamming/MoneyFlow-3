@@ -4,9 +4,13 @@ import android.content.Context
 import android.content.Intent
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -15,6 +19,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -33,7 +38,10 @@ import com.example.utils.ExportUtils
 import com.example.utils.FormatUtils
 import com.example.viewmodel.FinanceViewModel
 import java.io.File
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun HistoryScreen(
@@ -47,51 +55,84 @@ fun HistoryScreen(
     val selectedFilter by financeViewModel.selectedFilter.collectAsState()
 
     var selectedHistoryTab by remember { mutableStateOf(0) } // 0 = Semua, 1 = Pemasukan, 2 = Pengeluaran
+    var selectedSourceFilter by remember { mutableStateOf("Semua") } // "Semua", "Suara", "Struk", "Manual"
     var showConfirmDeleteAll by remember { mutableStateOf(false) }
     var showExportMenu by remember { mutableStateOf(false) }
     var showScanDialog by remember { mutableStateOf(false) }
     var showVoiceDialog by remember { mutableStateOf(false) }
 
-    // Interactive Filter logic
-    val filteredTransactions = remember(transactions, searchQuery, selectedFilter, selectedHistoryTab) {
-        val now = System.currentTimeMillis()
-        val calendar = Calendar.getInstance()
+    // Helper to format date headers for grouped transactions
+    fun getDateHeader(timestamp: Long): String {
+        val calItem = Calendar.getInstance().apply { timeInMillis = timestamp }
+        val calNow = Calendar.getInstance()
 
-        // Start date calculations depending on chips
-        val filterTimeBoundary: Long = when (selectedFilter) {
+        val isToday = calItem.get(Calendar.YEAR) == calNow.get(Calendar.YEAR) &&
+                calItem.get(Calendar.DAY_OF_YEAR) == calNow.get(Calendar.DAY_OF_YEAR)
+
+        val calYesterday = (calNow.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, -1) }
+        val isYesterday = calItem.get(Calendar.YEAR) == calYesterday.get(Calendar.YEAR) &&
+                calItem.get(Calendar.DAY_OF_YEAR) == calYesterday.get(Calendar.DAY_OF_YEAR)
+
+        return when {
+            isToday -> "Hari Ini (" + SimpleDateFormat("dd MMMM yyyy", Locale("in", "ID")).format(Date(timestamp)) + ")"
+            isYesterday -> "Kemarin (" + SimpleDateFormat("dd MMMM yyyy", Locale("in", "ID")).format(Date(timestamp)) + ")"
+            else -> SimpleDateFormat("EEEE, dd MMMM yyyy", Locale("in", "ID")).format(Date(timestamp))
+        }
+    }
+
+    // Interactive Filter logic supporting Harian, Mingguan, Bulanan, and Semua
+    val filteredTransactions = remember(transactions, searchQuery, selectedFilter, selectedHistoryTab, selectedSourceFilter) {
+        val now = System.currentTimeMillis()
+
+        // Exact date boundaries for Harian, Mingguan, Bulanan
+        val (filterStart, filterEnd) = when (selectedFilter) {
             "Harian" -> {
-                calendar.apply {
-                    timeInMillis = now
+                val cal = Calendar.getInstance().apply {
                     set(Calendar.HOUR_OF_DAY, 0)
                     set(Calendar.MINUTE, 0)
                     set(Calendar.SECOND, 0)
                     set(Calendar.MILLISECOND, 0)
-                }.timeInMillis
+                }
+                val start = cal.timeInMillis
+                val end = start + (24L * 60 * 60 * 1000) - 1
+                Pair(start, end)
             }
             "Mingguan" -> {
-                calendar.apply {
-                    timeInMillis = now
+                val cal = Calendar.getInstance().apply {
                     add(Calendar.DAY_OF_YEAR, -7)
-                }.timeInMillis
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                Pair(cal.timeInMillis, now)
             }
             "Bulanan" -> {
-                calendar.apply {
-                    timeInMillis = now
+                val cal = Calendar.getInstance().apply {
                     set(Calendar.DAY_OF_MONTH, 1)
                     set(Calendar.HOUR_OF_DAY, 0)
                     set(Calendar.MINUTE, 0)
                     set(Calendar.SECOND, 0)
                     set(Calendar.MILLISECOND, 0)
-                }.timeInMillis
+                }
+                Pair(cal.timeInMillis, now)
             }
-            else -> 0L // "Semua"
+            else -> Pair(0L, Long.MAX_VALUE) // "Semua"
         }
 
         val baseList = transactions.filter { item ->
-            val matchesFilter = item.date >= filterTimeBoundary
+            val matchesTime = item.date in filterStart..filterEnd
             val matchesSearch = item.note.contains(searchQuery, ignoreCase = true) ||
                     item.category.contains(searchQuery, ignoreCase = true)
-            matchesFilter && matchesSearch
+
+            val matchesSource = when (selectedSourceFilter) {
+                "Suara" -> item.note.contains("[Suara]")
+                "Struk" -> item.note.contains("[Struk]")
+                "Manual" -> !item.note.contains("[Suara]") && !item.note.contains("[Struk]")
+                else -> true
+            }
+
+            matchesTime && matchesSearch && matchesSource
         }
 
         when (selectedHistoryTab) {
@@ -99,6 +140,12 @@ fun HistoryScreen(
             2 -> baseList.filter { it.type == "EXPENSE" }
             else -> baseList
         }
+    }
+
+    // Grouping transactions by date header
+    val groupedTransactions = remember(filteredTransactions) {
+        filteredTransactions.sortedByDescending { it.date }
+            .groupBy { getDateHeader(it.date) }
     }
 
     // Calculated summary stats for the current filtered view
@@ -159,7 +206,7 @@ fun HistoryScreen(
                     color = MaterialTheme.colorScheme.onBackground
                 )
                 Text(
-                    text = "${filteredTransactions.size} transaksi tercatat",
+                    text = "${filteredTransactions.size} transaksi ($selectedFilter)",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -214,7 +261,7 @@ fun HistoryScreen(
                     modifier = Modifier.testTag("scan_receipt_history_button")
                 ) {
                     Icon(
-                        imageVector = Icons.Default.CameraAlt,
+                        imageVector = Icons.Default.CenterFocusWeak,
                         contentDescription = "Pindai Struk / Bukti Bayar",
                         tint = MaterialTheme.colorScheme.primary
                     )
@@ -250,7 +297,7 @@ fun HistoryScreen(
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { financeViewModel.setSearchQuery(it) },
-            placeholder = { Text("Cari catatan atau kategori...", fontSize = 13.sp) },
+            placeholder = { Text("Cari catatan, kategori, atau struk...", fontSize = 13.sp) },
             leadingIcon = {
                 Icon(
                     Icons.Default.Search,
@@ -272,7 +319,7 @@ fun HistoryScreen(
             shape = RoundedCornerShape(14.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 12.dp)
+                .padding(bottom = 8.dp)
                 .testTag("search_input"),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedContainerColor = MaterialTheme.colorScheme.surface,
@@ -285,7 +332,7 @@ fun HistoryScreen(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 12.dp),
+                .padding(bottom = 8.dp),
             shape = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
         ) {
@@ -305,7 +352,7 @@ fun HistoryScreen(
                         onClick = { selectedHistoryTab = index },
                         modifier = Modifier
                             .weight(1f)
-                            .height(36.dp),
+                            .height(34.dp),
                         shape = RoundedCornerShape(9.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = tabBg,
@@ -319,29 +366,79 @@ fun HistoryScreen(
             }
         }
 
-        // Time Period Filter Chips
+        // 1. Time Period Filter Chips: Harian, Mingguan, Bulanan, Semua
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(bottom = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            val chips = listOf("Semua", "Harian", "Mingguan", "Bulanan")
-            chips.forEach { item ->
-                val isSelected = selectedFilter == item
+            val periodChips = listOf(
+                "Semua" to "Semua Waktu",
+                "Harian" to "Harian",
+                "Mingguan" to "Mingguan",
+                "Bulanan" to "Bulanan"
+            )
+            periodChips.forEach { (key, label) ->
+                val isSelected = selectedFilter == key
                 FilterChip(
                     selected = isSelected,
-                    onClick = { financeViewModel.setSelectedFilter(item) },
+                    onClick = { financeViewModel.setSelectedFilter(key) },
                     label = {
                         Text(
-                            text = item,
-                            fontSize = 12.sp,
-                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                            text = label,
+                            fontSize = 11.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                        )
+                    },
+                    leadingIcon = {
+                        val icon = when (key) {
+                            "Harian" -> Icons.Default.Today
+                            "Mingguan" -> Icons.Default.DateRange
+                            "Bulanan" -> Icons.Default.CalendarMonth
+                            else -> Icons.Default.AllInclusive
+                        }
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp)
                         )
                     },
                     colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        selectedContainerColor = MaterialTheme.colorScheme.primary,
+                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                        selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+
+        // 2. Source Filter Chips: Semua Sumber, Suara, Struk, Manual
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(bottom = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            val sourceOptions = listOf(
+                "Semua" to "Semua Sumber",
+                "Suara" to "🎙️ Suara",
+                "Struk" to "🧾 Struk",
+                "Manual" to "✏️ Manual"
+            )
+
+            sourceOptions.forEach { (key, label) ->
+                val isSelected = selectedSourceFilter == key
+                FilterChip(
+                    selected = isSelected,
+                    onClick = { selectedSourceFilter = key },
+                    label = { Text(label, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Color(0xFF0066FF).copy(alpha = 0.15f),
+                        selectedLabelColor = Color(0xFF0066FF)
                     ),
                     shape = RoundedCornerShape(10.dp)
                 )
@@ -353,59 +450,84 @@ fun HistoryScreen(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 12.dp),
+                    .padding(bottom = 10.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text("Total Masuk", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            text = FormatUtils.formatRupiah(summaryIncome),
-                            fontSize = 12.sp,
+                            text = when (selectedFilter) {
+                                "Harian" -> "📅 Periode: Hari Ini"
+                                "Mingguan" -> "📅 Periode: 7 Hari Terakhir"
+                                "Bulanan" -> "📅 Periode: Bulan Ini"
+                                else -> "📅 Periode: Semua Waktu"
+                            },
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = SoftGreenSuccess,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "${filteredTransactions.size} Transaksi",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
 
-                    Column {
-                        Text("Total Keluar", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(
-                            text = FormatUtils.formatRupiah(summaryExpense),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = SoftRedDanger,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+                    Spacer(modifier = Modifier.height(6.dp))
 
-                    val net = summaryIncome - summaryExpense
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text("Selisih", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(
-                            text = (if (net >= 0) "+" else "") + FormatUtils.formatRupiah(net),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (net >= 0) SoftGreenSuccess else SoftRedDanger,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Total Masuk", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                text = FormatUtils.formatRupiah(summaryIncome),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = SoftGreenSuccess,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Column {
+                            Text("Total Keluar", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                text = FormatUtils.formatRupiah(summaryExpense),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = SoftRedDanger,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        val net = summaryIncome - summaryExpense
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("Selisih", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                text = (if (net >= 0) "+" else "") + FormatUtils.formatRupiah(net),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (net >= 0) SoftGreenSuccess else SoftRedDanger,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
             }
         }
 
-        // List Display
+        // List Display with grouped date headers
         if (filteredTransactions.isEmpty()) {
             Box(
                 modifier = Modifier
@@ -430,7 +552,7 @@ fun HistoryScreen(
                         color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
                     )
                     Text(
-                        text = "Coba ubah kata kunci pencarian atau filter Anda",
+                        text = "Tidak ada transaksi untuk filter periode $selectedFilter",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f)
                     )
@@ -442,13 +564,36 @@ fun HistoryScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(bottom = 100.dp)
             ) {
-                items(filteredTransactions, key = { it.id }) { item ->
-                    TransactionRowItem(
-                        transaction = item,
-                        onClick = {
-                            navController.navigate("transaction_detail/${item.id}")
+                groupedTransactions.forEach { (dateHeader, itemsInDate) ->
+                    item(key = "header_$dateHeader") {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 10.dp, bottom = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = dateHeader,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            HorizontalDivider(
+                                modifier = Modifier.weight(1f),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                            )
                         }
-                    )
+                    }
+
+                    items(itemsInDate, key = { it.id }) { item ->
+                        HistoryItemCard(
+                            transaction = item,
+                            onClick = {
+                                navController.navigate("transaction_detail/${item.id}")
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -465,6 +610,127 @@ fun HistoryScreen(
         onDismiss = { showVoiceDialog = false },
         financeViewModel = financeViewModel
     )
+}
+
+@Composable
+fun HistoryItemCard(transaction: Transaction, onClick: () -> Unit) {
+    val categoryIcon = getCategoryIcon(transaction.category)
+    val colorAccent = if (transaction.type == "INCOME") SoftGreenSuccess else SoftRedDanger
+
+    // Detect Source Badge
+    val isVoice = transaction.note.contains("[Suara]")
+    val isReceipt = transaction.note.contains("[Struk]")
+    val cleanNote = transaction.note
+        .replace("[Suara]", "")
+        .replace("[Struk]", "")
+        .trim()
+        .ifBlank { transaction.category }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(colorAccent.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = categoryIcon,
+                    contentDescription = transaction.category,
+                    tint = colorAccent,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = cleanNote,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(modifier = Modifier.height(3.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    // Source Input Badge
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = when {
+                            isVoice -> Color(0xFFE0E7FF)
+                            isReceipt -> Color(0xFFEDE9FE)
+                            else -> MaterialTheme.colorScheme.surfaceVariant
+                        }
+                    ) {
+                        Text(
+                            text = when {
+                                isVoice -> "🎙️ Suara"
+                                isReceipt -> "🧾 Struk"
+                                else -> "✏️ Manual"
+                            },
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = when {
+                                isVoice -> Color(0xFF3730A3)
+                                isReceipt -> Color(0xFF6B21A8)
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+
+                    // Wallet badge
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    ) {
+                        Text(
+                            text = transaction.walletAccount,
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+
+                    // Date & Time
+                    Text(
+                        text = SimpleDateFormat("dd MMM, HH:mm", Locale("in", "ID")).format(Date(transaction.date)),
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            Text(
+                text = (if (transaction.type == "INCOME") "+" else "-") + FormatUtils.formatRupiah(transaction.amount),
+                color = colorAccent,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
+            )
+        }
+    }
 }
 
 private fun shareExportedFile(context: Context, file: File, mimeType: String) {

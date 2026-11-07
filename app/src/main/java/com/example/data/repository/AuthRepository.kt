@@ -18,6 +18,17 @@ class AuthRepository(
     val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
 
     suspend fun loadSavedUser(): User? {
+        // Ensure default demo account exists if database is fresh
+        val existingDemo = userDao.getUserByEmail("user@moneyflow.com")
+        if (existingDemo == null) {
+            val demoUser = User(
+                fullName = "MoneyFlow User",
+                email = "user@moneyflow.com",
+                passwordHash = "password123"
+            )
+            userDao.insertUser(demoUser)
+        }
+
         val savedUserId = prefs.getInt("logged_in_user_id", -1)
         if (savedUserId != -1) {
             val user = userDao.getUserById(savedUserId)
@@ -32,13 +43,15 @@ class AuthRepository(
     }
 
     suspend fun login(email: String, passwordHash: String): Result<User> {
-        // For premium user experience, handle simple input checks first
-        if (email.isBlank() || passwordHash.isBlank()) {
+        val trimmedEmail = email.trim()
+        val trimmedPass = passwordHash.trim()
+        if (trimmedEmail.isBlank() || trimmedPass.isBlank()) {
             return Result.failure(Exception("Email dan password tidak boleh kosong"))
         }
-        val user = userDao.getUserByEmail(email) ?: return Result.failure(Exception("Akun tidak ditemukan"))
-        if (user.passwordHash != passwordHash) {
-            return Result.failure(Exception("Password salah"))
+        val user = userDao.getUserByEmail(trimmedEmail) 
+            ?: return Result.failure(Exception("Akun tidak ditemukan. Silakan buat akun di tab Daftar."))
+        if (user.passwordHash != trimmedPass) {
+            return Result.failure(Exception("Password salah. Silakan periksa kembali kata sandi Anda."))
         }
         _currentUser.value = user
         prefs.edit().putInt("logged_in_user_id", user.id).apply()
@@ -46,14 +59,23 @@ class AuthRepository(
     }
 
     suspend fun register(fullName: String, email: String, passwordHash: String): Result<User> {
-        if (fullName.isBlank() || email.isBlank() || passwordHash.isBlank()) {
-            return Result.failure(Exception("Semua formulir harus diisi"))
+        val trimmedName = fullName.trim()
+        val trimmedEmail = email.trim()
+        val trimmedPass = passwordHash.trim()
+        if (trimmedName.isBlank() || trimmedEmail.isBlank() || trimmedPass.isBlank()) {
+            return Result.failure(Exception("Semua formulir (Nama, Email, Password) harus diisi"))
         }
-        val existingUser = userDao.getUserByEmail(email)
+        if (!trimmedEmail.contains("@") || !trimmedEmail.contains(".")) {
+            return Result.failure(Exception("Format email tidak valid"))
+        }
+        if (trimmedPass.length < 4) {
+            return Result.failure(Exception("Password minimal harus 4 karakter"))
+        }
+        val existingUser = userDao.getUserByEmail(trimmedEmail)
         if (existingUser != null) {
-            return Result.failure(Exception("Email sudah terdaftar"))
+            return Result.failure(Exception("Email sudah terdaftar. Silakan masuk di tab Login."))
         }
-        val newUser = User(fullName = fullName, email = email, passwordHash = passwordHash)
+        val newUser = User(fullName = trimmedName, email = trimmedEmail, passwordHash = trimmedPass)
         try {
             val generatedId = userDao.insertUser(newUser)
             val finalUser = newUser.copy(id = generatedId.toInt())

@@ -24,26 +24,31 @@ data class ParsedReceiptTransaction(
     val date: Long
 )
 
+data class ScannedReceiptItem(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val name: String,
+    val amount: Double,
+    val category: String = "Belanja(Shopping)",
+    val walletAccount: String = "Tunai",
+    val date: Long = System.currentTimeMillis(),
+    val type: String = "EXPENSE"
+)
+
 data class FinancialCategorySpend(
     val name: String,
     val amount: Double,
-    val colorHex: Long,
-    val iconType: String // "food", "drink", "transport", "entertainment", "other"
+    val percentage: Double = 0.0,
+    val colorHex: Long = 0xFF0066FF,
+    val iconType: String = "other"
 )
 
 data class FinancialReportData(
     val title: String = "Berikut laporan keuangan kamu hari ini:",
-    val netIncome: Double = 1250000.0,
-    val incomeChangeText: String = "↑ +12% dari kemarin",
-    val totalExpense: Double = 850000.0,
-    val expenseChangeText: String = "↓ -8% dari kemarin",
-    val categories: List<FinancialCategorySpend> = listOf(
-        FinancialCategorySpend("Makanan", 320000.0, 0xFFFFA500, "food"),
-        FinancialCategorySpend("Minuman", 80000.0, 0xFF38BDF8, "drink"),
-        FinancialCategorySpend("Transportasi", 150000.0, 0xFF10B981, "transport"),
-        FinancialCategorySpend("Hiburan", 100000.0, 0xFFA855F7, "entertainment"),
-        FinancialCategorySpend("Lainnya", 200000.0, 0xFF94A3B8, "other")
-    )
+    val netIncome: Double = 0.0,
+    val incomeChangeText: String = "0% dari kemarin",
+    val totalExpense: Double = 0.0,
+    val expenseChangeText: String = "0% dari kemarin",
+    val categories: List<FinancialCategorySpend> = emptyList()
 )
 
 data class ChatMessage(
@@ -153,6 +158,111 @@ object OpenRouterAiService {
 
         // Robust Local Fallback Parser if API is unavailable, offline, or returns error
         return@withContext parseReceiptLocally(ocrText)
+    }
+
+    /**
+     * Parses multiple receipt OCR texts into a combined list of ScannedReceiptItem.
+     */
+    suspend fun parseMultipleReceipts(
+        ocrTexts: List<String>,
+        baseUrl: String,
+        apiKey: String,
+        model: String
+    ): List<ScannedReceiptItem> = withContext(Dispatchers.IO) {
+        val result = mutableListOf<ScannedReceiptItem>()
+        for (ocr in ocrTexts) {
+            if (ocr.isNotBlank()) {
+                val items = parseReceiptItems(ocr, baseUrl, apiKey, model)
+                result.addAll(items)
+            }
+        }
+        result
+    }
+
+    /**
+     * Parses raw OCR receipt text into a detailed list of items (or summary items).
+     */
+    suspend fun parseReceiptItems(
+        ocrText: String,
+        baseUrl: String,
+        apiKey: String,
+        model: String
+    ): List<ScannedReceiptItem> = withContext(Dispatchers.IO) {
+        if (apiKey.isNotBlank()) {
+            try {
+                val normalizedUrl = normalizeBaseUrl(baseUrl)
+                val fullUrl = "$normalizedUrl/chat/completions"
+
+                val prompt = """
+                    Kamu adalah sistem analisis struk belanja dan nota keuangan.
+                    Analisis teks OCR struk berikut dan ekstrak daftar item/barang belanjaan beserta harganya ke dalam format JSON murni tanpa markdown/backticks.
+                    
+                    Format JSON:
+                    {
+                      "storeName": "nama toko/merchant",
+                      "dateFormatted": "yyyy-MM-dd",
+                      "walletAccount": "Tunai / E-Wallet / BCA / BRI / Danamon / Lainnya",
+                      "items": [
+                        {
+                          "name": "nama barang/item",
+                          "amount": 25000,
+                          "category": "Makanan / Minuman / Belanja(Shopping) / Transportasi / Tagihan Rutin / Kesehatan / Lainnya"
+                        }
+                      ],
+                      "totalAmount": total nominal angka keseluruhan
+                    }
+
+                    Teks OCR:
+                    $ocrText
+                """.trimIndent()
+
+                val messages = JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("role", "system")
+                        put("content", "Kamu adalah parser struk belanja terperinci. Jawab hanya dengan JSON tunggal.")
+                    })
+                    put(JSONObject().apply {
+                        put("role", "user")
+                        put("content", prompt)
+                    })
+                }
+
+                val requestJson = JSONObject().apply {
+                    put("model", model.ifBlank { "google/gemini-2.0-flash-001" })
+                    put("messages", messages)
+                    put("temperature", 0.1)
+                }
+
+                val request = Request.Builder()
+                    .url(fullUrl)
+                    .addHeader("Authorization", "Bearer ${apiKey.trim()}")
+                    .addHeader("HTTP-Referer", "https://moneyflow.local")
+                    .addHeader("X-Title", "MoneyFlow Android")
+                    .post(requestJson.toString().toRequestBody(JSON_MEDIA_TYPE.toMediaType()))
+                    .build()
+
+                val response = client.newCall(request).execute()
+                val responseBody = response.body?.string()
+
+                if (response.isSuccessful && !responseBody.isNullOrBlank()) {
+                    val root = JSONObject(responseBody)
+                    val choices = root.optJSONArray("choices")
+                    if (choices != null && choices.length() > 0) {
+                        val messageObj = choices.getJSONObject(0).optJSONObject("message")
+                        val content = messageObj?.optString("content") ?: ""
+                        val items = extractItemsFromJson(content)
+                        if (items.isNotEmpty()) {
+                            return@withContext items
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        // Local robust fallback
+        return@withContext parseReceiptItemsLocally(ocrText)
     }
 
     /**
@@ -485,14 +595,187 @@ object OpenRouterAiService {
 
         val note = if (speechText.length > 50) speechText.take(50) else speechText
 
+        val lowerSpeech = speechText.lowercase().trim()
+        var timestamp = System.currentTimeMillis()
+        val calendar = java.util.Calendar.getInstance()
+        if (lowerSpeech.contains("kemarin")) {
+            calendar.add(java.util.Calendar.DAY_OF_YEAR, -1)
+            timestamp = calendar.timeInMillis
+        } else if (lowerSpeech.contains("lusa")) {
+            calendar.add(java.util.Calendar.DAY_OF_YEAR, -2)
+            timestamp = calendar.timeInMillis
+        } else if (lowerSpeech.contains("hari ini") || lowerSpeech.contains("tadi")) {
+            timestamp = System.currentTimeMillis()
+        }
+
         return ParsedReceiptTransaction(
             amount = amount,
             type = type,
             category = category,
             walletAccount = wallet,
             note = note.ifBlank { "Input Suara" },
-            date = System.currentTimeMillis()
+            date = timestamp
         )
+    }
+
+    fun extractItemsFromJson(rawContent: String): List<ScannedReceiptItem> {
+        val result = mutableListOf<ScannedReceiptItem>()
+        try {
+            val trimmed = rawContent.trim()
+            val startIdx = trimmed.indexOf('{')
+            val endIdx = trimmed.lastIndexOf('}')
+            if (startIdx != -1 && endIdx != -1 && endIdx > startIdx) {
+                val jsonString = trimmed.substring(startIdx, endIdx + 1)
+                val json = JSONObject(jsonString)
+
+                val storeName = json.optString("storeName", "Struk Belanja")
+                val wallet = json.optString("walletAccount", "Tunai").ifBlank { "Tunai" }
+                val dateStr = json.optString("dateFormatted", "")
+                var timestamp = System.currentTimeMillis()
+                if (dateStr.isNotBlank()) {
+                    try {
+                        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+                        val parsed = sdf.parse(dateStr)
+                        if (parsed != null) timestamp = parsed.time
+                    } catch (e: Exception) {
+                        // fallback
+                    }
+                }
+
+                val itemsArray = json.optJSONArray("items")
+                if (itemsArray != null && itemsArray.length() > 0) {
+                    for (i in 0 until itemsArray.length()) {
+                        val itemObj = itemsArray.optJSONObject(i) ?: continue
+                        val name = itemObj.optString("name", "Item ${i + 1}").ifBlank { "Item ${i + 1}" }
+                        val amount = itemObj.optDouble("amount", 0.0)
+                        val category = itemObj.optString("category", "Belanja(Shopping)").ifBlank { "Belanja(Shopping)" }
+                        if (amount > 0) {
+                            result.add(
+                                ScannedReceiptItem(
+                                    name = if (storeName.isNotBlank() && storeName != "Struk Belanja") "$storeName - $name" else name,
+                                    amount = amount,
+                                    category = category,
+                                    walletAccount = wallet,
+                                    date = timestamp,
+                                    type = "EXPENSE"
+                                )
+                            )
+                        }
+                    }
+                }
+
+                if (result.isEmpty()) {
+                    val totalAmount = json.optDouble("totalAmount", json.optDouble("amount", 0.0))
+                    if (totalAmount > 0) {
+                        result.add(
+                            ScannedReceiptItem(
+                                name = storeName.ifBlank { "Total Pembelian Struk" },
+                                amount = totalAmount,
+                                category = "Belanja(Shopping)",
+                                walletAccount = wallet,
+                                date = timestamp,
+                                type = "EXPENSE"
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return result
+    }
+
+    fun parseReceiptItemsLocally(ocrText: String): List<ScannedReceiptItem> {
+        val result = mutableListOf<ScannedReceiptItem>()
+        val lines = ocrText.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        if (lines.isEmpty()) return result
+
+        var foundDate = System.currentTimeMillis()
+        val datePattern = Pattern.compile("""\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b""")
+        val dateMatcher = datePattern.matcher(ocrText)
+        if (dateMatcher.find()) {
+            try {
+                val d = dateMatcher.group(1)?.toIntOrNull() ?: 1
+                val m = (dateMatcher.group(2)?.toIntOrNull() ?: 1) - 1
+                var y = dateMatcher.group(3)?.toIntOrNull() ?: 2026
+                if (y < 100) y += 2000
+                val cal = java.util.Calendar.getInstance()
+                cal.set(y, m, d)
+                foundDate = cal.timeInMillis
+            } catch (e: Exception) {
+                // ignore
+            }
+        }
+
+        // Store name
+        val storeName = lines.firstOrNull { it.length in 3..25 && !it.contains(Regex("""\d""")) } ?: "Struk Belanja"
+        var wallet = "Tunai"
+        val lowerAll = ocrText.lowercase()
+        if (lowerAll.contains("bca")) wallet = "BCA"
+        else if (lowerAll.contains("bri")) wallet = "BRI"
+        else if (lowerAll.contains("danamon")) wallet = "Danamon"
+        else if (lowerAll.contains("qris") || lowerAll.contains("gopay") || lowerAll.contains("ovo") || lowerAll.contains("dana") || lowerAll.contains("shopeepay")) {
+            wallet = "E-Wallet"
+        }
+
+        val itemAmountPattern = Pattern.compile("""^([a-zA-Z\s]{3,25})\s+.*?(\d{1,3}(?:[.,]\d{3})+|\d{4,7})\b""")
+        val singleAmountPattern = Pattern.compile("""(?:rp|total|subtotal|tunai|cash|bayar)?\s*[:=]?\s*([0-9]{1,3}(?:[.,][0-9]{3})+)""", Pattern.CASE_INSENSITIVE)
+
+        for (line in lines) {
+            val matcher = itemAmountPattern.matcher(line)
+            if (matcher.find()) {
+                val itemName = matcher.group(1)?.trim() ?: ""
+                val rawNum = matcher.group(2)?.replace(".", "")?.replace(",", "") ?: ""
+                val amount = rawNum.toDoubleOrNull() ?: 0.0
+                val lowerName = itemName.lowercase()
+                if (amount in 500.0..100000000.0 && !lowerName.contains("total") && !lowerName.contains("subtotal") && !lowerName.contains("tunai") && !lowerName.contains("kembali")) {
+                    val cat = when {
+                        lowerName.contains("kopi") || lowerName.contains("tea") || lowerName.contains("drink") || lowerName.contains("susu") || lowerName.contains("juice") -> "Minuman"
+                        lowerName.contains("roti") || lowerName.contains("nasi") || lowerName.contains("mie") || lowerName.contains("ayam") || lowerName.contains("snack") || lowerName.contains("biskuit") -> "Makanan"
+                        else -> "Belanja(Shopping)"
+                    }
+                    result.add(
+                        ScannedReceiptItem(
+                            name = if (storeName != "Struk Belanja") "$storeName: $itemName" else itemName,
+                            amount = amount,
+                            category = cat,
+                            walletAccount = wallet,
+                            date = foundDate,
+                            type = "EXPENSE"
+                        )
+                    )
+                }
+            }
+        }
+
+        // If no line items parsed, parse max total amount as single transaction
+        if (result.isEmpty()) {
+            var maxAmount = 0.0
+            for (line in lines) {
+                val m = singleAmountPattern.matcher(line)
+                while (m.find()) {
+                    val num = m.group(1)?.replace(".", "")?.replace(",", "")?.toDoubleOrNull() ?: 0.0
+                    if (num > maxAmount && num < 500000000) {
+                        maxAmount = num
+                    }
+                }
+            }
+            if (maxAmount > 0) {
+                result.add(
+                    ScannedReceiptItem(
+                        name = storeName,
+                        amount = maxAmount,
+                        category = "Belanja(Shopping)",
+                        walletAccount = wallet,
+                        date = foundDate,
+                        type = "EXPENSE"
+                    )
+                )
+            }
+        }
+
+        return result
     }
 
     private fun generateLocalAssistantResponse(query: String, contextData: String): String {

@@ -3,6 +3,7 @@ package com.example.ui.screens
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -84,21 +85,11 @@ fun SplashScreen(navController: NavController, authViewModel: AuthViewModel) {
                 verticalArrangement = Arrangement.Center,
                 modifier = Modifier.scale(scale.value)
             ) {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    shape = ShapeDefaults.ExtraLarge,
-                    elevation = CardDefaults.cardElevation(defaultElevation = 10.dp),
+                Image(
+                    painter = painterResource(id = R.drawable.ic_moneyflow_logo),
+                    contentDescription = "Logo",
                     modifier = Modifier.size(96.dp)
-                ) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.ic_wallet_custom),
-                            contentDescription = "Logo",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(54.dp)
-                        )
-                    }
-                }
+                )
                 
                 Spacer(modifier = Modifier.height(20.dp))
                 

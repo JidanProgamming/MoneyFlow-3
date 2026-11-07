@@ -1,8 +1,12 @@
 package com.example.ui.components
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.MediaPlayer
+import android.media.MediaRecorder
+import android.os.Build
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -12,8 +16,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -21,16 +27,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -41,8 +50,11 @@ import com.example.ui.theme.SoftRedDanger
 import com.example.utils.FormatUtils
 import com.example.utils.OpenRouterAiService
 import com.example.viewmodel.FinanceViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.io.File
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -63,17 +75,30 @@ fun VoiceInputDialog(
     val apiKey by financeViewModel.openRouterApiKey.collectAsState()
     val model by financeViewModel.openRouterModel.collectAsState()
 
-    var isListening by remember { mutableStateOf(false) }
-    var recognizedSpokenText by remember { mutableStateOf("") }
-    var manualTextInput by remember { mutableStateOf("") }
+    // Recording and audio states
+    var isRecording by remember { mutableStateOf(false) }
+    var recordingDurationSec by remember { mutableStateOf(0) }
+    var audioFile by remember { mutableStateOf<File?>(null) }
+    var isPlayingAudio by remember { mutableStateOf(false) }
+    var audioDurationMs by remember { mutableStateOf(0) }
+    var audioCurrentMs by remember { mutableStateOf(0) }
+
+    // MediaRecorder & MediaPlayer instances
+    var mediaRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
+    var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+
+    // SpeechRecognizer
+    var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
+    var transcribedText by remember { mutableStateOf("") }
     var isProcessingAi by remember { mutableStateOf(false) }
 
-    // Parsed transaction fields
+    // Parsed editable fields
     var parsedAmount by remember { mutableStateOf("") }
     var parsedType by remember { mutableStateOf("EXPENSE") }
     var parsedCategory by remember { mutableStateOf("Makanan") }
     var parsedWallet by remember { mutableStateOf("Tunai") }
     var parsedNote by remember { mutableStateOf("") }
+    var parsedDate by remember { mutableStateOf(System.currentTimeMillis()) }
     var hasResult by remember { mutableStateOf(false) }
 
     val categories = listOf(
@@ -85,21 +110,58 @@ fun VoiceInputDialog(
 
     val wallets = listOf("Tunai", "E-Wallet", "BCA", "BRI", "Danamon", "Lainnya")
 
-    // SpeechRecognizer instance
-    var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
+    // Timer for recording duration
+    LaunchedEffect(isRecording) {
+        if (isRecording) {
+            recordingDurationSec = 0
+            while (isRecording) {
+                delay(1000)
+                recordingDurationSec += 1
+            }
+        }
+    }
 
+    // Playback progress loop
+    LaunchedEffect(isPlayingAudio) {
+        if (isPlayingAudio) {
+            while (isPlayingAudio) {
+                try {
+                    audioCurrentMs = mediaPlayer?.currentPosition ?: 0
+                } catch (e: Exception) {
+                    isPlayingAudio = false
+                }
+                delay(200)
+            }
+        }
+    }
+
+    // Cleanup audio resources on dispose
     DisposableEffect(Unit) {
         if (SpeechRecognizer.isRecognitionAvailable(context)) {
             speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context)
         }
         onDispose {
+            try {
+                if (isRecording) {
+                    mediaRecorder?.stop()
+                    mediaRecorder?.release()
+                }
+            } catch (e: Exception) {
+                // ignore
+            }
+            try {
+                mediaPlayer?.stop()
+                mediaPlayer?.release()
+            } catch (e: Exception) {
+                // ignore
+            }
             speechRecognizer?.destroy()
             speechRecognizer = null
         }
     }
 
-    // Process spoken or typed text with AI
-    fun processVoiceTextWithAi(text: String) {
+    // AI Analysis function
+    fun runAiAnalysis(text: String) {
         if (text.isBlank()) return
         isProcessingAi = true
         coroutineScope.launch {
@@ -115,93 +177,133 @@ fun VoiceInputDialog(
             parsedCategory = parsed.category
             parsedWallet = parsed.walletAccount
             parsedNote = parsed.note
+            parsedDate = parsed.date
             hasResult = true
             isProcessingAi = false
         }
     }
 
-    fun startListening() {
-        if (speechRecognizer == null) {
-            Toast.makeText(context, "Speech recognition tidak tersedia di perangkat ini. Silakan ketik kalimat transaksi.", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        recognizedSpokenText = ""
-        isListening = true
-
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "id-ID")
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "Bicarakan transaksi keuangan Anda...")
-        }
-
-        speechRecognizer?.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) {}
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
-            override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {
-                isListening = false
-            }
-            override fun onError(error: Int) {
-                isListening = false
-            }
-            override fun onResults(results: Bundle?) {
-                isListening = false
-                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                if (!matches.isNullOrEmpty()) {
-                    val text = matches[0]
-                    recognizedSpokenText = text
-                    manualTextInput = text
-                    processVoiceTextWithAi(text)
-                }
-            }
-            override fun onPartialResults(partialResults: Bundle?) {
-                val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                if (!matches.isNullOrEmpty()) {
-                    recognizedSpokenText = matches[0]
-                }
-            }
-            override fun onEvent(eventType: Int, params: Bundle?) {}
-        })
-
+    // Stop recording and process
+    fun stopRecording() {
+        if (!isRecording) return
+        isRecording = false
         try {
-            speechRecognizer?.startListening(intent)
+            mediaRecorder?.stop()
+            mediaRecorder?.release()
+            mediaRecorder = null
         } catch (e: Exception) {
-            isListening = false
-            Toast.makeText(context, "Tidak dapat memulai pengenalan suara: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+            e.printStackTrace()
+        }
+        speechRecognizer?.stopListening()
+
+        // Prepare player if audio file exists
+        audioFile?.let { file ->
+            if (file.exists() && file.length() > 0) {
+                try {
+                    mediaPlayer?.release()
+                    mediaPlayer = MediaPlayer().apply {
+                        setDataSource(file.absolutePath)
+                        prepare()
+                        audioDurationMs = duration
+                        setOnCompletionListener {
+                            isPlayingAudio = false
+                            audioCurrentMs = 0
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+
+        // Run AI parsing
+        if (transcribedText.isNotBlank()) {
+            runAiAnalysis(transcribedText)
         }
     }
 
+    // Start recording function
+    fun startRecording() {
+        try {
+            // Setup local audio recording file
+            val file = File(context.cacheDir, "voice_note_${System.currentTimeMillis()}.m4a")
+            audioFile = file
+
+            val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                MediaRecorder(context)
+            } else {
+                @Suppress("DEPRECATION")
+                MediaRecorder()
+            }
+
+            recorder.apply {
+                setAudioSource(MediaRecorder.AudioSource.MIC)
+                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                setOutputFile(file.absolutePath)
+                prepare()
+                start()
+            }
+            mediaRecorder = recorder
+            isRecording = true
+            hasResult = false
+            transcribedText = ""
+
+            // Start live speech recognizer
+            if (SpeechRecognizer.isRecognitionAvailable(context)) {
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "id-ID")
+                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                }
+
+                speechRecognizer?.setRecognitionListener(object : RecognitionListener {
+                    override fun onReadyForSpeech(params: Bundle?) {}
+                    override fun onBeginningOfSpeech() {}
+                    override fun onRmsChanged(rmsdB: Float) {}
+                    override fun onBufferReceived(buffer: ByteArray?) {}
+                    override fun onEndOfSpeech() {}
+                    override fun onError(error: Int) {}
+                    override fun onResults(results: Bundle?) {
+                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        if (!matches.isNullOrEmpty()) {
+                            val text = matches[0]
+                            transcribedText = text
+                            runAiAnalysis(text)
+                        }
+                    }
+                    override fun onPartialResults(partialResults: Bundle?) {
+                        val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        if (!matches.isNullOrEmpty()) {
+                            transcribedText = matches[0]
+                        }
+                    }
+                    override fun onEvent(eventType: Int, params: Bundle?) {}
+                })
+                speechRecognizer?.startListening(intent)
+            }
+        } catch (e: Exception) {
+            isRecording = false
+            Toast.makeText(context, "Gagal memulai rekaman suara: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Permission launcher
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
-            startListening()
+            startRecording()
         } else {
-            Toast.makeText(context, "Izin mikrofon diperlukan untuk fitur voice over.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Izin mikrofon diperlukan untuk merekam suara.", Toast.LENGTH_SHORT).show()
         }
     }
 
-    fun onMicClicked() {
-        if (isListening) {
-            speechRecognizer?.stopListening()
-            isListening = false
-        } else {
-            val hasPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-            if (hasPerm) {
-                startListening()
-            } else {
-                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-            }
-        }
-    }
-
-    // Pulse animation for recording microphone
+    // Pulsating animation for recording indicator
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val pulseScale by infiniteTransition.animateFloat(
         initialValue = 1f,
-        targetValue = if (isListening) 1.25f else 1f,
+        targetValue = if (isRecording) 1.22f else 1f,
         animationSpec = infiniteRepeatable(
             animation = tween(600, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
@@ -211,8 +313,8 @@ fun VoiceInputDialog(
 
     Dialog(
         onDismissRequest = {
-            if (!isProcessingAi) {
-                speechRecognizer?.stopListening()
+            if (!isProcessingAi && !isRecording) {
+                mediaPlayer?.stop()
                 onDismiss()
             }
         },
@@ -221,8 +323,8 @@ fun VoiceInputDialog(
         Surface(
             modifier = Modifier
                 .fillMaxWidth(0.94f)
-                .fillMaxHeight(0.9f)
-                .clip(RoundedCornerShape(24.dp))
+                .fillMaxHeight(0.92f)
+                .clip(RoundedCornerShape(26.dp))
                 .testTag("voice_input_dialog"),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp
@@ -241,28 +343,28 @@ fun VoiceInputDialog(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
+                                .size(40.dp)
                                 .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primaryContainer),
+                                .background(Color(0xFF0066FF).copy(alpha = 0.12f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Mic,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
+                                tint = Color(0xFF0066FF),
+                                modifier = Modifier.size(22.dp)
                             )
                         }
-                        Spacer(modifier = Modifier.width(10.dp))
+                        Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = "Voice Over Keuangan",
-                                fontSize = 16.sp,
+                                text = "Voice Note Keuangan",
+                                fontSize = 17.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "Catat Transaksi dengan Suara",
+                                text = "Rekam, Putar Ulang, & Analisis AI",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -270,8 +372,12 @@ fun VoiceInputDialog(
                     }
 
                     IconButton(
-                        onClick = onDismiss,
-                        enabled = !isProcessingAi
+                        onClick = {
+                            if (!isRecording) {
+                                mediaPlayer?.stop()
+                                onDismiss()
+                            }
+                        }
                     ) {
                         Icon(Icons.Default.Close, contentDescription = "Tutup")
                     }
@@ -279,241 +385,388 @@ fun VoiceInputDialog(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Microphone pulse button
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 12.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    IconButton(
-                        onClick = { onMicClicked() },
-                        modifier = Modifier
-                            .size(72.dp)
-                            .scale(if (isListening) pulseScale else 1f)
-                            .clip(CircleShape)
-                            .background(if (isListening) SoftRedDanger else MaterialTheme.colorScheme.primary)
-                            .testTag("btn_voice_mic")
-                    ) {
-                        Icon(
-                            imageVector = if (isListening) Icons.Default.MicOff else Icons.Default.Mic,
-                            contentDescription = "Bicara",
-                            tint = Color.White,
-                            modifier = Modifier.size(36.dp)
-                        )
-                    }
-                }
-
-                Text(
-                    text = if (isListening) "Mendengarkan... Bicaralah sekarang..." else "Tekan mikrofon & sebutkan transaksi (contoh: 'Makan siang 25000 pakai tunai')",
-                    fontSize = 12.sp,
-                    color = if (isListening) SoftRedDanger else MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = if (isListening) FontWeight.Bold else FontWeight.Normal,
-                    modifier = Modifier.align(Alignment.CenterHorizontally)
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Manual text entry / voice recognition result preview
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    OutlinedTextField(
-                        value = manualTextInput,
-                        onValueChange = { manualTextInput = it },
-                        placeholder = { Text("Atau ketik kalimat suara di sini...") },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(54.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        singleLine = true
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = { processVoiceTextWithAi(manualTextInput) },
-                        modifier = Modifier.height(54.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        enabled = manualTextInput.isNotBlank() && !isProcessingAi
-                    ) {
-                        Icon(Icons.Default.Send, contentDescription = "Kirim ke AI")
-                    }
-                }
-
-                if (isProcessingAi) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("AI sedang memproses ucapan...", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Scrollable Form content with parsed results
+                // Scrollable content
                 Column(
                     modifier = Modifier
                         .weight(1f)
                         .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Type Selector
-                    Row(
+                    // Record / Stop Control Section
+                    Surface(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        shape = RoundedCornerShape(20.dp),
+                        color = if (isRecording) Color(0xFFFFF1F2) else Color(0xFFF0F7FF),
+                        border = BorderStroke(1.dp, if (isRecording) SoftRedDanger.copy(alpha = 0.4f) else Color(0xFF0066FF).copy(alpha = 0.2f))
                     ) {
-                        FilterChip(
-                            selected = parsedType == "EXPENSE",
-                            onClick = { parsedType = "EXPENSE" },
-                            label = { Text("Pengeluaran") },
-                            leadingIcon = {
-                                Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = SoftRedDanger, modifier = Modifier.size(16.dp))
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-
-                        FilterChip(
-                            selected = parsedType == "INCOME",
-                            onClick = { parsedType = "INCOME" },
-                            label = { Text("Pemasukan") },
-                            leadingIcon = {
-                                Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = SoftGreenSuccess, modifier = Modifier.size(16.dp))
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-
-                    // Amount Field
-                    OutlinedTextField(
-                        value = parsedAmount,
-                        onValueChange = { parsedAmount = it.filter { ch -> ch.isDigit() } },
-                        label = { Text("Nominal Uang (Rp)") },
-                        placeholder = { Text("0") },
-                        singleLine = true,
-                        leadingIcon = {
-                            Text("Rp", fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 12.dp))
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-
-                    // Note
-                    OutlinedTextField(
-                        value = parsedNote,
-                        onValueChange = { parsedNote = it },
-                        label = { Text("Catatan Transaksi") },
-                        placeholder = { Text("Catatan singkat") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-
-                    // Category Selector
-                    Text("Kategori:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                    var catExpanded by remember { mutableStateOf(false) }
-                    ExposedDropdownMenuBox(
-                        expanded = catExpanded,
-                        onExpandedChange = { catExpanded = it }
-                    ) {
-                        OutlinedTextField(
-                            value = parsedCategory,
-                            onValueChange = {},
-                            readOnly = true,
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = catExpanded) },
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .menuAnchor(),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                        ExposedDropdownMenu(
-                            expanded = catExpanded,
-                            onDismissRequest = { catExpanded = false }
+                                .padding(18.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            categories.forEach { cat ->
-                                DropdownMenuItem(
-                                    text = { Text(cat) },
-                                    onClick = {
-                                        parsedCategory = cat
-                                        catExpanded = false
+                            // Circular Mic Button
+                            Box(
+                                modifier = Modifier
+                                    .size(80.dp)
+                                    .scale(pulseScale)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (isRecording) SoftRedDanger else Color(0xFF0066FF)
+                                    )
+                                    .clickable {
+                                        if (isRecording) {
+                                            stopRecording()
+                                        } else {
+                                            val hasPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                                            if (hasPerm) {
+                                                startRecording()
+                                            } else {
+                                                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                            }
+                                        }
                                     }
+                                    .testTag("btn_mic_record_toggle"),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.Mic,
+                                    contentDescription = if (isRecording) "Hentikan Rekaman" else "Mulai Rekam",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(38.dp)
                                 )
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Text(
+                                text = if (isRecording) "Merekam Suara: ${String.format(Locale.getDefault(), "%02d:%02d", recordingDurationSec / 60, recordingDurationSec % 60)}"
+                                else if (audioFile != null) "Rekaman Selesai (${String.format(Locale.getDefault(), "%02d:%02d", (audioDurationMs / 1000) / 60, (audioDurationMs / 1000) % 60)})"
+                                else "Tekan tombol untuk mulai merekam",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isRecording) SoftRedDanger else Color(0xFF0066FF)
+                            )
+
+                            Text(
+                                text = if (isRecording) "Tekan ikon Stop untuk mengakhiri rekaman"
+                                else "Sebutkan contoh: 'Beli bensin 50 ribu pakai tunai' atau 'Gaji masuk 5 juta'",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+
+                            // Playback Section (Putar Ulang Rekaman)
+                            if (audioFile != null && !isRecording) {
+                                Spacer(modifier = Modifier.height(14.dp))
+                                HorizontalDivider(color = Color(0xFF0066FF).copy(alpha = 0.15f))
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    // Play / Pause Button
+                                    FilledTonalIconButton(
+                                        onClick = {
+                                            try {
+                                                if (isPlayingAudio) {
+                                                    mediaPlayer?.pause()
+                                                    isPlayingAudio = false
+                                                } else {
+                                                    mediaPlayer?.start()
+                                                    isPlayingAudio = true
+                                                }
+                                            } catch (e: Exception) {
+                                                e.printStackTrace()
+                                            }
+                                        },
+                                        modifier = Modifier.size(42.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isPlayingAudio) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                            contentDescription = if (isPlayingAudio) "Jeda" else "Putar Ulang",
+                                            tint = Color(0xFF0066FF)
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.width(10.dp))
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = if (isPlayingAudio) "Sedang Memutar Ulang..." else "Putar Ulang Rekaman Suara",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Color(0xFF0066FF)
+                                        )
+                                        LinearProgressIndicator(
+                                            progress = {
+                                                if (audioDurationMs > 0) (audioCurrentMs.toFloat() / audioDurationMs.toFloat()).coerceIn(0f, 1f)
+                                                else 0f
+                                            },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(6.dp)
+                                                .clip(RoundedCornerShape(3.dp)),
+                                            color = Color(0xFF0066FF),
+                                            trackColor = Color(0xFFE2E8F0)
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.width(8.dp))
+
+                                    // Re-record button
+                                    OutlinedButton(
+                                        onClick = {
+                                            mediaPlayer?.stop()
+                                            audioFile = null
+                                            hasResult = false
+                                            transcribedText = ""
+                                            val hasPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                                            if (hasPerm) startRecording() else permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                        modifier = Modifier.height(36.dp)
+                                    ) {
+                                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Ulang", fontSize = 11.sp)
+                                    }
+                                }
                             }
                         }
                     }
 
-                    // Wallet Selector
-                    Text("Dari / Ke Dompet:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                    var wExpanded by remember { mutableStateOf(false) }
-                    ExposedDropdownMenuBox(
-                        expanded = wExpanded,
-                        onExpandedChange = { wExpanded = it }
-                    ) {
-                        OutlinedTextField(
-                            value = parsedWallet,
-                            onValueChange = {},
-                            readOnly = true,
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = wExpanded) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .menuAnchor(),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                        ExposedDropdownMenu(
-                            expanded = wExpanded,
-                            onDismissRequest = { wExpanded = false }
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Live Speech Transcribed Text or Manual Input Field
+                    OutlinedTextField(
+                        value = transcribedText,
+                        onValueChange = {
+                            transcribedText = it
+                            if (it.length > 5) runAiAnalysis(it)
+                        },
+                        label = { Text("Teks Suara / Kalimat Transaksi") },
+                        placeholder = { Text("Ucapkan atau ketik transaksi Anda...") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("voice_transcribed_input"),
+                        shape = RoundedCornerShape(14.dp),
+                        trailingIcon = {
+                            if (transcribedText.isNotBlank()) {
+                                IconButton(onClick = { runAiAnalysis(transcribedText) }) {
+                                    Icon(Icons.Default.AutoAwesome, contentDescription = "Analisis AI", tint = Color(0xFF0066FF))
+                                }
+                            }
+                        }
+                    )
+
+                    // Loading State for AI parsing
+                    if (isProcessingAi) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(vertical = 8.dp)
                         ) {
-                            wallets.forEach { w ->
-                                DropdownMenuItem(
-                                    text = { Text(w) },
-                                    onClick = {
-                                        parsedWallet = w
-                                        wExpanded = false
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.5.dp, color = Color(0xFF0066FF))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("AI sedang menganalisis nominal, kategori, dan tanggal...", fontSize = 12.sp, color = Color(0xFF0066FF), fontWeight = FontWeight.Medium)
+                        }
+                    }
+
+                    // Editable Results Form (User can edit before saving)
+                    if (hasResult) {
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(18.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Hasil Analisis AI (Dapat Diedit)", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = if (parsedType == "INCOME") SoftGreenSuccess.copy(alpha = 0.15f) else SoftRedDanger.copy(alpha = 0.15f)
+                                    ) {
+                                        Text(
+                                            text = if (parsedType == "INCOME") "Pemasukan" else "Pengeluaran",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (parsedType == "INCOME") SoftGreenSuccess else SoftRedDanger,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                        )
                                     }
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                // Type Toggle (Pemasukan / Pengeluaran)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    FilterChip(
+                                        selected = parsedType == "EXPENSE",
+                                        onClick = { parsedType = "EXPENSE" },
+                                        label = { Text("Pengeluaran") },
+                                        leadingIcon = { Icon(Icons.Default.ArrowDownward, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    FilterChip(
+                                        selected = parsedType == "INCOME",
+                                        onClick = { parsedType = "INCOME" },
+                                        label = { Text("Pemasukan") },
+                                        leadingIcon = { Icon(Icons.Default.ArrowUpward, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                // Nominal Input Field
+                                OutlinedTextField(
+                                    value = parsedAmount,
+                                    onValueChange = { parsedAmount = it.filter { char -> char.isDigit() } },
+                                    label = { Text("Nominal Uang (Rp)") },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
+                                    supportingText = {
+                                        val amt = parsedAmount.toDoubleOrNull() ?: 0.0
+                                        Text(FormatUtils.formatRupiah(amt), fontWeight = FontWeight.Bold, color = Color(0xFF0066FF))
+                                    }
+                                )
+
+                                Spacer(modifier = Modifier.height(6.dp))
+
+                                // Category Dropdown Picker
+                                var categoryMenuExpanded by remember { mutableStateOf(false) }
+                                ExposedDropdownMenuBox(
+                                    expanded = categoryMenuExpanded,
+                                    onExpandedChange = { categoryMenuExpanded = !categoryMenuExpanded }
+                                ) {
+                                    OutlinedTextField(
+                                        value = parsedCategory,
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        label = { Text("Kategori") },
+                                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryMenuExpanded) },
+                                        modifier = Modifier
+                                            .menuAnchor(MenuAnchorType.PrimaryNotEditable, true)
+                                            .fillMaxWidth(),
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+                                    ExposedDropdownMenu(
+                                        expanded = categoryMenuExpanded,
+                                        onDismissRequest = { categoryMenuExpanded = false }
+                                    ) {
+                                        categories.forEach { cat ->
+                                            DropdownMenuItem(
+                                                text = { Text(cat) },
+                                                onClick = {
+                                                    parsedCategory = cat
+                                                    categoryMenuExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                // Wallet Dropdown Picker
+                                var walletMenuExpanded by remember { mutableStateOf(false) }
+                                ExposedDropdownMenuBox(
+                                    expanded = walletMenuExpanded,
+                                    onExpandedChange = { walletMenuExpanded = !walletMenuExpanded }
+                                ) {
+                                    OutlinedTextField(
+                                        value = parsedWallet,
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        label = { Text("Sumber Dompet / Rekening") },
+                                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = walletMenuExpanded) },
+                                        modifier = Modifier
+                                            .menuAnchor(MenuAnchorType.PrimaryNotEditable, true)
+                                            .fillMaxWidth(),
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+                                    ExposedDropdownMenu(
+                                        expanded = walletMenuExpanded,
+                                        onDismissRequest = { walletMenuExpanded = false }
+                                    ) {
+                                        wallets.forEach { w ->
+                                            DropdownMenuItem(
+                                                text = { Text(w) },
+                                                onClick = {
+                                                    parsedWallet = w
+                                                    walletMenuExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                // Note / Description Field
+                                OutlinedTextField(
+                                    value = parsedNote,
+                                    onValueChange = { parsedNote = it },
+                                    label = { Text("Catatan / Keterangan Transaksi") },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp)
                                 )
                             }
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                // Auto Save to History button
+                // Bottom Action Button: Save to Riwayat
                 Button(
                     onClick = {
                         val amount = parsedAmount.toDoubleOrNull() ?: 0.0
                         if (amount <= 0.0) {
-                            Toast.makeText(context, "Silakan sebutkan atau isi nominal uang!", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Silakan isi atau ucapkan nominal uang!", Toast.LENGTH_SHORT).show()
                             return@Button
                         }
 
+                        // Save transaction with source tag [Suara]
                         financeViewModel.addTransaction(
                             amount = amount,
                             type = parsedType,
                             category = parsedCategory,
-                            note = parsedNote.ifBlank { "Input Suara Voice Over" },
-                            date = System.currentTimeMillis(),
+                            note = "[Suara] ${parsedNote.ifBlank { "Transaksi Suara" }}",
+                            date = parsedDate,
                             walletAccount = parsedWallet
                         )
 
-                        Toast.makeText(context, "Transaksi suara berhasil masuk ke riwayat!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Transaksi berhasil disimpan ke Riwayat!", Toast.LENGTH_SHORT).show()
                         onTransactionSaved?.invoke()
                         onDismiss()
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(50.dp)
-                        .testTag("btn_save_voice_transaction"),
+                        .height(52.dp)
+                        .testTag("btn_confirm_save_voice_transaction"),
                     shape = RoundedCornerShape(14.dp),
-                    enabled = parsedAmount.isNotBlank() && !isProcessingAi
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0066FF)),
+                    enabled = parsedAmount.isNotBlank() && !isProcessingAi && !isRecording
                 ) {
                     Icon(Icons.Default.CheckCircle, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Otomatis Masuk ke Riwayat", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text("Konfirmasi & Simpan ke Riwayat", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }

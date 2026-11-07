@@ -57,7 +57,8 @@ import java.util.Locale
 fun AiAssistantChatScreen(
     financeViewModel: FinanceViewModel,
     modifier: Modifier = Modifier,
-    onBack: (() -> Unit)? = null
+    onBack: (() -> Unit)? = null,
+    onNavigateToAnalytics: (() -> Unit)? = null
 ) {
     val coroutineScope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
@@ -73,85 +74,241 @@ fun AiAssistantChatScreen(
     var showMenu by remember { mutableStateOf(false) }
     var showScanReceiptDialog by remember { mutableStateOf(false) }
 
-    // Helper to generate dynamic financial report from actual Room database
-    fun buildReport(period: String): FinancialReportData {
-        val cal = Calendar.getInstance()
+    // 20 Defined Categories with individual icons, colors, and mapping
+    val definedCategories = remember {
+        listOf(
+            "Makanan" to Triple("food", 0xFFFFA500, Icons.Default.Restaurant),
+            "Minuman" to Triple("drink", 0xFF0EA5E9, Icons.Default.LocalCafe),
+            "Transportasi" to Triple("transport", 0xFF10B981, Icons.Default.DirectionsCar),
+            "Hiburan" to Triple("entertainment", 0xFFA855F7, Icons.Default.SportsEsports),
+            "Tempat Tinggal" to Triple("housing", 0xFFF43F5E, Icons.Default.Home),
+            "Tagihan Rutin" to Triple("bills", 0xFFF59E0B, Icons.Default.Receipt),
+            "Pulsa/Data" to Triple("phone", 0xFF6366F1, Icons.Default.PhoneAndroid),
+            "Langganan" to Triple("subscription", 0xFFEC4899, Icons.Default.Star),
+            "Belanja" to Triple("shopping", 0xFF06B6D4, Icons.Default.ShoppingCart),
+            "Kesehatan" to Triple("health", 0xFFEF4444, Icons.Default.LocalHospital),
+            "Pajak" to Triple("tax", 0xFF64748B, Icons.Default.AccountBalance),
+            "Cicilan/Hutang Produktif" to Triple("debt_productive", 0xFF14B8A6, Icons.Default.CreditCard),
+            "Cicilan/Hutang Konsumtif" to Triple("debt_consumptive", 0xFFFB923C, Icons.Default.Payments),
+            "Zakat & Sedekah" to Triple("charity", 0xFF22C55E, Icons.Default.Favorite),
+            "Perawatan Diri" to Triple("self_care", 0xFFD946EF, Icons.Default.Face),
+            "Keluarga" to Triple("family", 0xFF3B82F6, Icons.Default.People),
+            "Kebutuhan Sekolah" to Triple("school", 0xFF8B5CF6, Icons.Default.School),
+            "E-Wallet" to Triple("ewallet", 0xFF38BDF8, Icons.Default.AccountBalanceWallet),
+            "Jajan" to Triple("snack", 0xFFEAB308, Icons.Default.Fastfood),
+            "Lainnya" to Triple("other", 0xFF94A3B8, Icons.Default.Category)
+        )
+    }
+
+    fun mapCategoryKey(raw: String): String {
+        val l = raw.lowercase()
+        return when {
+            l.contains("makan") || l.contains("food") -> "Makanan"
+            l.contains("minum") || l.contains("kopi") || l.contains("cafe") || l.contains("tea") -> "Minuman"
+            l.contains("transport") || l.contains("bensin") || l.contains("ojol") || l.contains("grab") || l.contains("gojek") -> "Transportasi"
+            l.contains("hiburan") || l.contains("game") || l.contains("nonton") || l.contains("bioskop") -> "Hiburan"
+            l.contains("tempat tinggal") || l.contains("kos") || l.contains("sewa") || l.contains("kontrakan") -> "Tempat Tinggal"
+            l.contains("tagihan rutin") || l.contains("listrik") || l.contains("pln") || l.contains("air") || l.contains("pdam") -> "Tagihan Rutin"
+            l.contains("pulsa") || l.contains("data") || l.contains("kuota") -> "Pulsa/Data"
+            l.contains("langganan") || l.contains("subscription") || l.contains("netflix") || l.contains("spotify") -> "Langganan"
+            l.contains("belanja") || l.contains("shopping") || l.contains("supermarket") || l.contains("mall") -> "Belanja"
+            l.contains("kesehatan") || l.contains("obat") || l.contains("dokter") || l.contains("apotek") || l.contains("klinik") -> "Kesehatan"
+            l.contains("pajak") || l.contains("tax") -> "Pajak"
+            l.contains("produktif") -> "Cicilan/Hutang Produktif"
+            l.contains("konsumtif") -> "Cicilan/Hutang Konsumtif"
+            l.contains("zakat") || l.contains("sedekah") || l.contains("infak") || l.contains("donasi") -> "Zakat & Sedekah"
+            l.contains("perawatan") || l.contains("salon") || l.contains("skincare") -> "Perawatan Diri"
+            l.contains("keluarga") || l.contains("orang tua") || l.contains("anak") -> "Keluarga"
+            l.contains("sekolah") || l.contains("kuliah") || l.contains("pendidikan") || l.contains("kursus") -> "Kebutuhan Sekolah"
+            l.contains("e-wallet") || l.contains("ewallet") || l.contains("topup") || l.contains("gopay") || l.contains("ovo") || l.contains("dana") -> "E-Wallet"
+            l.contains("jajan") || l.contains("snack") || l.contains("cemilan") -> "Jajan"
+            else -> "Lainnya"
+        }
+    }
+
+    // Helper to generate dynamic financial report from actual Room database (100% REAL DATA, NO DUMMY DATA)
+    fun buildRealFinancialReport(period: String): FinancialReportData {
         val now = System.currentTimeMillis()
-        
-        // Define timestamp threshold based on requested period
-        val threshold = when (period.lowercase()) {
+        val calToday = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val todayStart = calToday.timeInMillis
+
+        data class PeriodBounds(
+            val curStart: Long,
+            val curEnd: Long,
+            val prevStart: Long,
+            val prevEnd: Long,
+            val title: String,
+            val suffix: String
+        )
+
+        // Determine current and previous comparison periods
+        val bounds = when (period.lowercase()) {
             "mingguan", "laporan mingguan" -> {
-                cal.add(Calendar.DAY_OF_YEAR, -7)
-                cal.timeInMillis
+                val curStart = now - (7L * 24 * 60 * 60 * 1000)
+                val pStart = curStart - (7L * 24 * 60 * 60 * 1000)
+                PeriodBounds(curStart, now, pStart, curStart, "Berikut laporan keuangan kamu 7 hari terakhir:", "pekan lalu")
             }
             "bulanan", "laporan bulanan" -> {
-                cal.add(Calendar.DAY_OF_YEAR, -30)
-                cal.timeInMillis
+                val curStart = now - (30L * 24 * 60 * 60 * 1000)
+                val pStart = curStart - (30L * 24 * 60 * 60 * 1000)
+                PeriodBounds(curStart, now, pStart, curStart, "Berikut laporan keuangan kamu 30 hari terakhir:", "bulan lalu")
             }
             else -> {
-                cal.set(Calendar.HOUR_OF_DAY, 0)
-                cal.set(Calendar.MINUTE, 0)
-                cal.set(Calendar.SECOND, 0)
-                cal.set(Calendar.MILLISECOND, 0)
-                cal.timeInMillis
+                val calYesterday = (calToday.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, -1) }
+                val yStart = calYesterday.timeInMillis
+                PeriodBounds(todayStart, now, yStart, todayStart, "Berikut laporan keuangan kamu hari ini:", "kemarin")
             }
         }
 
-        val filtered = allTransactions.filter { it.date >= threshold }
-        var totalIncome = 0.0
-        var totalExpense = 0.0
-        var food = 0.0
-        var drink = 0.0
-        var transport = 0.0
-        var entertainment = 0.0
-        var other = 0.0
+        val curStartLong = bounds.curStart
+        val curEndLong = bounds.curEnd
+        val prevStartLong = bounds.prevStart
+        val prevEndLong = bounds.prevEnd
+        val titleStr = bounds.title
+        val suffixStr = bounds.suffix
 
-        filtered.forEach { t ->
-            if (t.type == "INCOME") {
-                totalIncome += t.amount
+        val currentTrans = allTransactions.filter { it.date in curStartLong..curEndLong }
+        val prevTrans = allTransactions.filter { it.date in prevStartLong until prevEndLong }
+
+        val totalIncome = currentTrans.filter { it.type == "INCOME" && it.category != "Piutang" }.sumOf { it.amount }
+        val totalExpense = currentTrans.filter { it.type == "EXPENSE" }.sumOf { it.amount }
+
+        val prevIncome = prevTrans.filter { it.type == "INCOME" && it.category != "Piutang" }.sumOf { it.amount }
+        val prevExpense = prevTrans.filter { it.type == "EXPENSE" }.sumOf { it.amount }
+
+        // Compute actual trend change based on real previous data
+        fun formatIncomeTrend(current: Double, prev: Double, suffix: String): String {
+            if (prev <= 0.0) {
+                return if (current > 0.0) "↑ +100% dari $suffix" else "0% dari $suffix"
+            }
+            val pct = ((current - prev) / prev) * 100.0
+            return if (pct >= 0) {
+                "↑ +${String.format(Locale.US, "%.0f", pct)}% dari $suffix"
             } else {
-                totalExpense += t.amount
-                val catLower = t.category.lowercase()
-                when {
-                    catLower.contains("makan") || catLower.contains("food") -> food += t.amount
-                    catLower.contains("minum") || catLower.contains("kopi") || catLower.contains("cafe") -> drink += t.amount
-                    catLower.contains("transport") || catLower.contains("bensin") || catLower.contains("ojol") -> transport += t.amount
-                    catLower.contains("hiburan") || catLower.contains("game") || catLower.contains("nonton") -> entertainment += t.amount
-                    else -> other += t.amount
-                }
+                "↓ -${String.format(Locale.US, "%.0f", Math.abs(pct))}% dari $suffix"
             }
         }
 
-        // If today has no transactions recorded yet, show realistic sample amounts as seen in the mockup
-        val isFallback = (totalIncome == 0.0 && totalExpense == 0.0)
-        val finalIncome = if (isFallback) 1250000.0 else totalIncome
-        val finalExpense = if (isFallback) 850000.0 else totalExpense
-        val finalFood = if (isFallback) 320000.0 else if (food > 0) food else 50000.0
-        val finalDrink = if (isFallback) 80000.0 else if (drink > 0) drink else 25000.0
-        val finalTransport = if (isFallback) 150000.0 else if (transport > 0) transport else 45000.0
-        val finalEntertainment = if (isFallback) 100000.0 else if (entertainment > 0) entertainment else 30000.0
-        val finalOther = if (isFallback) 200000.0 else other
-
-        val periodTitle = when (period.lowercase()) {
-            "mingguan", "laporan mingguan" -> "Berikut laporan keuangan kamu minggu ini:"
-            "bulanan", "laporan bulanan" -> "Berikut laporan keuangan kamu bulan ini:"
-            else -> "Berikut laporan keuangan kamu hari ini:"
+        fun formatExpenseTrend(current: Double, prev: Double, suffix: String): String {
+            if (prev <= 0.0) {
+                return if (current > 0.0) "↑ +100% dari $suffix" else "0% dari $suffix"
+            }
+            val pct = ((current - prev) / prev) * 100.0
+            return if (pct <= 0) {
+                "↓ ${String.format(Locale.US, "%.0f", pct)}% dari $suffix"
+            } else {
+                "↑ +${String.format(Locale.US, "%.0f", pct)}% dari $suffix"
+            }
         }
+
+        val incomeTrendText = formatIncomeTrend(totalIncome, prevIncome, suffixStr)
+        val expenseTrendText = formatExpenseTrend(totalExpense, prevExpense, suffixStr)
+
+        // Group actual expenses into the 20 requested categories
+        val expenseMap = mutableMapOf<String, Double>()
+        currentTrans.filter { it.type == "EXPENSE" }.forEach { t ->
+            val mapped = mapCategoryKey(t.category)
+            expenseMap[mapped] = (expenseMap[mapped] ?: 0.0) + t.amount
+        }
+
+        // Build all 20 category items with actual amounts and exact percentages
+        val categoryList = definedCategories.map { (catName, meta) ->
+            val amt = expenseMap[catName] ?: 0.0
+            val pct = if (totalExpense > 0.0) (amt / totalExpense) * 100.0 else 0.0
+            FinancialCategorySpend(
+                name = catName,
+                amount = amt,
+                percentage = pct,
+                colorHex = meta.second,
+                iconType = meta.first
+            )
+        }.sortedWith(compareByDescending<FinancialCategorySpend> { it.amount }.thenBy { it.name })
 
         return FinancialReportData(
-            title = periodTitle,
-            netIncome = finalIncome,
-            incomeChangeText = "↑ +12% dari kemarin",
-            totalExpense = finalExpense,
-            expenseChangeText = "↓ -8% dari kemarin",
-            categories = listOf(
-                FinancialCategorySpend("Makanan", finalFood, 0xFFFFA500, "food"),
-                FinancialCategorySpend("Minuman", finalDrink, 0xFF38BDF8, "drink"),
-                FinancialCategorySpend("Transportasi", finalTransport, 0xFF10B981, "transport"),
-                FinancialCategorySpend("Hiburan", finalEntertainment, 0xFFA855F7, "entertainment"),
-                FinancialCategorySpend("Lainnya", finalOther, 0xFF94A3B8, "other")
-            )
+            title = titleStr,
+            netIncome = totalIncome,
+            incomeChangeText = incomeTrendText,
+            totalExpense = totalExpense,
+            expenseChangeText = expenseTrendText,
+            categories = categoryList
         )
+    }
+
+    // Helper to build largest expenses text response from actual database
+    fun buildLargestExpensesResponse(): String {
+        val expenses = allTransactions.filter { it.type == "EXPENSE" }
+        if (expenses.isEmpty()) {
+            return "Belum ada catatan pengeluaran di database aplikasi Anda. Silakan catat transaksi melalui tombol (+) atau Pindai Struk."
+        }
+
+        val totalExpense = expenses.sumOf { it.amount }
+        val topCategories = expenses.groupBy { mapCategoryKey(it.category) }
+            .mapValues { it.value.sumOf { t -> t.amount } }
+            .toList()
+            .sortedByDescending { it.second }
+            .take(5)
+
+        val topTransactions = expenses.sortedByDescending { it.amount }.take(5)
+
+        val catText = topCategories.mapIndexed { idx, (cat, amt) ->
+            val pct = if (totalExpense > 0) (amt / totalExpense) * 100 else 0.0
+            "${idx + 1}. **$cat**: ${FormatUtils.formatRupiah(amt)} (${String.format(Locale.getDefault(), "%.1f", pct)}%)"
+        }.joinToString("\n")
+
+        val transText = topTransactions.joinToString("\n") { t ->
+            val dStr = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(t.date))
+            "• **${FormatUtils.formatRupiah(t.amount)}** - ${t.note.ifBlank { t.category }} ($dStr, ${t.walletAccount})"
+        }
+
+        return """
+            📊 **Rangkuman Pengeluaran Terbesar (Data Aktual Database)**:
+            Total Seluruh Pengeluaran: **${FormatUtils.formatRupiah(totalExpense)}**
+
+            🏆 **Top Kategori Pengeluaran Terbesar**:
+            $catText
+
+            🧾 **5 Transaksi Pengeluaran Tertinggi**:
+            $transText
+        """.trimIndent()
+    }
+
+    // Helper to build wallet balance text response from actual database
+    fun buildWalletBalanceResponse(): String {
+        val totalIncome = allTransactions.filter { it.type == "INCOME" && it.category != "Piutang" }.sumOf { it.amount }
+        val totalExpense = allTransactions.filter { it.type == "EXPENSE" }.sumOf { it.amount }
+        val totalBalance = totalIncome - totalExpense
+
+        fun getWalletBalance(name: String, initial: Double): Double {
+            val inc = allTransactions.filter { it.walletAccount.equals(name, ignoreCase = true) && it.type == "INCOME" }.sumOf { it.amount }
+            val exp = allTransactions.filter { it.walletAccount.equals(name, ignoreCase = true) && it.type == "EXPENSE" }.sumOf { it.amount }
+            return initial + inc - exp
+        }
+
+        val cash = getWalletBalance("Tunai", financeViewModel.initialCash.value)
+        val ewallet = getWalletBalance("E-Wallet", financeViewModel.initialEWallet.value)
+        val bca = getWalletBalance("BCA", financeViewModel.initialBca.value)
+        val bri = getWalletBalance("BRI", financeViewModel.initialBri.value)
+        val danamon = getWalletBalance("Danamon", financeViewModel.initialDanamon.value)
+        val other = getWalletBalance("Lainnya", financeViewModel.initialOther.value)
+
+        return """
+            💳 **Rincian Sisa Saldo Dompet & Rekening (Data Real-Time Database)**:
+            Total Saldo Bersih: **${FormatUtils.formatRupiah(totalBalance)}**
+
+            • 💵 **Tunai**: ${FormatUtils.formatRupiah(cash)}
+            • 📱 **E-Wallet**: ${FormatUtils.formatRupiah(ewallet)}
+            • 🏦 **Bank BCA**: ${FormatUtils.formatRupiah(bca)}
+            • 🏦 **Bank BRI**: ${FormatUtils.formatRupiah(bri)}
+            • 🏦 **Bank Danamon**: ${FormatUtils.formatRupiah(danamon)}
+            • 💳 **Rekening Lainnya**: ${FormatUtils.formatRupiah(other)}
+
+            💡 *Data di atas dihitung otomatis secara real-time dari transaksi Room Database.*
+        """.trimIndent()
     }
 
     // Initial conversation matching exact Gambar 1
@@ -165,13 +322,16 @@ fun AiAssistantChatScreen(
         )
     }
 
-    val quickActionSuggestions = listOf(
-        Pair("Laporan Harian", Icons.Default.CalendarToday),
-        Pair("Laporan Mingguan", Icons.Default.BarChart),
-        Pair("Laporan Bulanan", Icons.Default.CalendarMonth),
-        Pair("Pengeluaran Terbesar", Icons.Default.TrendingDown),
-        Pair("Sisa Saldo Dompet", Icons.Default.AccountBalanceWallet)
-    )
+    // Pill suggestions requested by user
+    val quickActionSuggestions = remember {
+        listOf(
+            Pair("Laporan Harian", Icons.Default.CalendarToday),
+            Pair("Laporan Mingguan", Icons.Default.BarChart),
+            Pair("Laporan Bulanan", Icons.Default.CalendarMonth),
+            Pair("Pengeluaran Terbesar", Icons.Default.TrendingDown),
+            Pair("Sisa Saldo Dompet", Icons.Default.AccountBalanceWallet)
+        )
+    }
 
     fun sendUserMessage(text: String) {
         val trimmed = text.trim()
@@ -183,23 +343,19 @@ fun AiAssistantChatScreen(
 
         val lower = trimmed.lowercase()
 
-        // If the query asks for a financial report / summary, render the rich financial report card directly!
-        if (lower.contains("laporan") || lower.contains("keuangan") || lower.contains("rekap") || lower.contains("hari ini") || lower.contains("minggu ini") || lower.contains("bulan ini")) {
-            val period = when {
-                lower.contains("minggu") -> "mingguan"
-                lower.contains("bulan") -> "bulanan"
-                else -> "harian"
-            }
+        // 1. Check for Financial Report requests (Harian, Mingguan, Bulanan)
+        if (lower.contains("laporan harian") || lower.contains("hari ini")) {
             coroutineScope.launch {
                 listState.animateScrollToItem(messages.size - 1)
                 isLoadingResponse = true
-                kotlinx.coroutines.delay(450)
+                kotlinx.coroutines.delay(200)
+                val report = buildRealFinancialReport("harian")
                 messages.add(
                     ChatMessage(
                         role = "assistant",
-                        content = "Berikut laporan keuangan kamu:",
+                        content = report.title,
                         isFinancialReport = true,
-                        reportData = buildReport(period)
+                        reportData = report
                     )
                 )
                 isLoadingResponse = false
@@ -208,7 +364,96 @@ fun AiAssistantChatScreen(
             return
         }
 
-        // For other AI queries, connect directly to OpenRouter AI or the local smart engine
+        if (lower.contains("laporan mingguan") || lower.contains("minggu ini")) {
+            coroutineScope.launch {
+                listState.animateScrollToItem(messages.size - 1)
+                isLoadingResponse = true
+                kotlinx.coroutines.delay(200)
+                val report = buildRealFinancialReport("mingguan")
+                messages.add(
+                    ChatMessage(
+                        role = "assistant",
+                        content = report.title,
+                        isFinancialReport = true,
+                        reportData = report
+                    )
+                )
+                isLoadingResponse = false
+                listState.animateScrollToItem(messages.size - 1)
+            }
+            return
+        }
+
+        if (lower.contains("laporan bulanan") || lower.contains("bulan ini")) {
+            coroutineScope.launch {
+                listState.animateScrollToItem(messages.size - 1)
+                isLoadingResponse = true
+                kotlinx.coroutines.delay(200)
+                val report = buildRealFinancialReport("bulanan")
+                messages.add(
+                    ChatMessage(
+                        role = "assistant",
+                        content = report.title,
+                        isFinancialReport = true,
+                        reportData = report
+                    )
+                )
+                isLoadingResponse = false
+                listState.animateScrollToItem(messages.size - 1)
+            }
+            return
+        }
+
+        // 2. Check for "Pengeluaran Terbesar"
+        if (lower.contains("pengeluaran terbesar") || lower.contains("paling boros")) {
+            coroutineScope.launch {
+                listState.animateScrollToItem(messages.size - 1)
+                isLoadingResponse = true
+                kotlinx.coroutines.delay(200)
+                val answer = buildLargestExpensesResponse()
+                messages.add(ChatMessage(role = "assistant", content = answer))
+                isLoadingResponse = false
+                listState.animateScrollToItem(messages.size - 1)
+            }
+            return
+        }
+
+        // 3. Check for "Sisa Saldo Dompet"
+        if (lower.contains("sisa saldo dompet") || lower.contains("saldo dompet") || lower.contains("sisa saldo")) {
+            coroutineScope.launch {
+                listState.animateScrollToItem(messages.size - 1)
+                isLoadingResponse = true
+                kotlinx.coroutines.delay(200)
+                val answer = buildWalletBalanceResponse()
+                messages.add(ChatMessage(role = "assistant", content = answer))
+                isLoadingResponse = false
+                listState.animateScrollToItem(messages.size - 1)
+            }
+            return
+        }
+
+        // 4. General reports query
+        if (lower.contains("laporan") || lower.contains("keuangan") || lower.contains("rekap")) {
+            coroutineScope.launch {
+                listState.animateScrollToItem(messages.size - 1)
+                isLoadingResponse = true
+                kotlinx.coroutines.delay(200)
+                val report = buildRealFinancialReport("harian")
+                messages.add(
+                    ChatMessage(
+                        role = "assistant",
+                        content = report.title,
+                        isFinancialReport = true,
+                        reportData = report
+                    )
+                )
+                isLoadingResponse = false
+                listState.animateScrollToItem(messages.size - 1)
+            }
+            return
+        }
+
+        // 5. Connect to OpenRouter AI or the local smart assistant
         isLoadingResponse = true
         coroutineScope.launch {
             listState.animateScrollToItem(messages.size - 1)
@@ -229,7 +474,7 @@ fun AiAssistantChatScreen(
         }
     }
 
-    // Receipt scanner dialog trigger from attachment button
+    // Receipt scanner dialog trigger from top menu
     if (showScanReceiptDialog) {
         ReceiptScanDialog(
             isOpen = true,
@@ -278,7 +523,7 @@ fun AiAssistantChatScreen(
 
                 Spacer(modifier = Modifier.width(4.dp))
 
-                // MoneyFlow Wallet Logo Badge (Menggunakan gambar logo asli)
+                // MoneyFlow Wallet Logo Badge
                 Image(
                     painter = painterResource(id = R.drawable.ic_moneyflow_logo),
                     contentDescription = "Logo MoneyFlow",
@@ -329,7 +574,7 @@ fun AiAssistantChatScreen(
                             text = { Text("Laporan Keuangan Hari Ini") },
                             onClick = {
                                 showMenu = false
-                                sendUserMessage("Lihat laporan keuangan hari ini")
+                                sendUserMessage("Laporan Harian")
                             },
                             leadingIcon = {
                                 Icon(Icons.Default.Assessment, contentDescription = null, tint = Color(0xFF0B63F6))
@@ -389,8 +634,7 @@ fun AiAssistantChatScreen(
                             ModernChatBubble(
                                 message = msg,
                                 onReportBannerClick = {
-                                    // Navigate to analytics or detail
-                                    onBack?.invoke()
+                                    onNavigateToAnalytics?.invoke() ?: onBack?.invoke()
                                 }
                             )
                         }
@@ -401,7 +645,6 @@ fun AiAssistantChatScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier.padding(start = 4.dp, top = 4.dp)
                                 ) {
-                                    // Bot Avatar
                                     BotAvatarBadge()
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Surface(
@@ -420,7 +663,7 @@ fun AiAssistantChatScreen(
                                             )
                                             Spacer(modifier = Modifier.width(10.dp))
                                             Text(
-                                                text = "MoneyFlow sedang menganalisis...",
+                                                text = "MoneyFlow sedang menganalisis data...",
                                                 fontSize = 12.sp,
                                                 color = Color(0xFF64748B)
                                             )
@@ -436,12 +679,12 @@ fun AiAssistantChatScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .horizontalScroll(rememberScrollState())
-                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        quickActionSuggestions.forEach { (text, icon) ->
+                        quickActionSuggestions.forEach { (label, icon) ->
                             Surface(
-                                onClick = { sendUserMessage(text) },
+                                onClick = { sendUserMessage(label) },
                                 shape = RoundedCornerShape(20.dp),
                                 color = Color.White,
                                 border = BorderStroke(1.2.dp, Color(0xFF007AFF)),
@@ -459,7 +702,7 @@ fun AiAssistantChatScreen(
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
-                                        text = text,
+                                        text = label,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = Color(0xFF007AFF)
@@ -469,7 +712,7 @@ fun AiAssistantChatScreen(
                         }
                     }
 
-                    // Bottom Input Area (White Surface with Paperclip, Text Pill, and Blue Send Button)
+                    // Bottom Input Area (Paperclip removed completely as requested!)
                     Surface(
                         color = Color.White,
                         shadowElevation = 8.dp,
@@ -483,28 +726,6 @@ fun AiAssistantChatScreen(
                                 .padding(horizontal = 14.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Attachment / Paperclip Button (Opens Receipt Scanner)
-                            Surface(
-                                onClick = { showScanReceiptDialog = true },
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .testTag("chat_attachment_button"),
-                                shape = CircleShape,
-                                color = Color.White,
-                                border = BorderStroke(1.2.dp, Color(0xFFE2E8F0))
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.AttachFile,
-                                        contentDescription = "Pindai Struk",
-                                        tint = Color(0xFF64748B),
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.width(10.dp))
-
                             // Rounded Input Text Pill
                             Surface(
                                 modifier = Modifier
@@ -611,7 +832,7 @@ fun ModernChatBubble(
 
         Column(
             horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
-            modifier = Modifier.widthIn(max = if (message.isFinancialReport) 340.dp else 290.dp)
+            modifier = Modifier.widthIn(max = if (message.isFinancialReport) 360.dp else 290.dp)
         ) {
             if (isUser) {
                 // User Message: Vibrant Blue Pill Bubble
@@ -705,7 +926,10 @@ fun ModernChatBubble(
 }
 
 /**
- * Rich Financial Report Card Component matching the user's mockup image
+ * Rich Financial Report Card Component matching the user's requirements:
+ * - Ringkasan Keuangan: Total Pemasukan Bersih & Total Pengeluaran dengan ikon lingkaran berwarna, nominal tebal, dan tren perubahan aktual.
+ * - Pengeluaran per Kategori: Kartu visual untuk 20 kategori dengan ikon, total nominal, dan persentase pengeluaran.
+ * - Banner Navigasi: "Lihat grafik lengkap di Analitik" terhubung ke halaman Analitik.
  */
 @Composable
 fun FinancialReportCardView(
@@ -840,7 +1064,7 @@ fun FinancialReportCardView(
                             text = reportData.expenseChangeText,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF10B981)
+                            color = if (reportData.expenseChangeText.startsWith("↓")) Color(0xFF10B981) else Color(0xFFEF4444)
                         )
                     }
                 }
@@ -848,38 +1072,49 @@ fun FinancialReportCardView(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Subtitle: Pengeluaran per Kategori
-            Text(
-                text = "Pengeluaran per Kategori",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF1E293B)
-            )
+            // Subtitle: Pengeluaran per Kategori (Menampilkan 20 Kategori)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Pengeluaran per Kategori (20 Kategori)",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF1E293B)
+                )
+                Text(
+                    text = "Geser →",
+                    fontSize = 10.sp,
+                    color = Color(0xFF64748B)
+                )
+            }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // 5 Category Cards (Horizontal Row)
+            // Visual Cards for 20 Categories (Scrollable Horizontal Row)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 reportData.categories.forEach { cat ->
                     Surface(
-                        modifier = Modifier.width(62.dp),
-                        shape = RoundedCornerShape(10.dp),
-                        color = Color(0xFFF8FAFC),
-                        border = BorderStroke(1.dp, Color(0xFFE2E8F0))
+                        modifier = Modifier.width(76.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (cat.amount > 0) Color(0xFFF8FAFC) else Color(0xFFF1F5F9).copy(alpha = 0.6f),
+                        border = BorderStroke(1.dp, if (cat.amount > 0) Color(0xFFCBD5E1) else Color(0xFFE2E8F0))
                     ) {
                         Column(
-                            modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
+                            modifier = Modifier.padding(vertical = 8.dp, horizontal = 5.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             // Circular Category Icon
                             Box(
                                 modifier = Modifier
-                                    .size(32.dp)
+                                    .size(34.dp)
                                     .clip(CircleShape)
                                     .background(Color(cat.colorHex)),
                                 contentAlignment = Alignment.Center
@@ -888,18 +1123,20 @@ fun FinancialReportCardView(
                                     imageVector = getCategoryVectorIcon(cat.iconType),
                                     contentDescription = cat.name,
                                     tint = Color.White,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(17.dp)
                                 )
                             }
 
-                            Spacer(modifier = Modifier.height(5.dp))
+                            Spacer(modifier = Modifier.height(6.dp))
 
                             Text(
                                 text = cat.name,
                                 fontSize = 9.sp,
-                                color = Color(0xFF475569),
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF334155),
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = TextAlign.Center
                             )
 
                             Spacer(modifier = Modifier.height(2.dp))
@@ -908,27 +1145,46 @@ fun FinancialReportCardView(
                                 text = FormatUtils.formatRupiah(cat.amount),
                                 fontSize = 8.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (cat.iconType == "transport") Color(0xFF10B981) else Color(0xFF0066FF),
+                                color = if (cat.amount > 0) Color(0xFF0066FF) else Color(0xFF94A3B8),
                                 textAlign = TextAlign.Center,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            // Percentage Pill Badge
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (cat.amount > 0) Color(0xFFEFF6FF) else Color(0xFFE2E8F0).copy(alpha = 0.5f)
+                            ) {
+                                Text(
+                                    text = "${String.format(Locale.getDefault(), "%.1f", cat.percentage)}%",
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (cat.amount > 0) Color(0xFF0066FF) else Color(0xFF94A3B8),
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
-            // Bottom Banner Link: "Lihat grafik lengkap di Google Sheets" / Analitik
+            // Bottom Banner Link: "Lihat grafik lengkap di Analitik"
             Surface(
                 onClick = onBannerClick,
                 shape = RoundedCornerShape(12.dp),
                 color = Color(0xFFF0F7FF),
-                modifier = Modifier.fillMaxWidth()
+                border = BorderStroke(1.dp, Color(0xFFBFDBFE)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("banner_analytics_navigation")
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
@@ -937,10 +1193,10 @@ fun FinancialReportCardView(
                         tint = Color(0xFF0066FF),
                         modifier = Modifier.size(20.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "Lihat grafik lengkap di Google Sheets",
-                        fontSize = 11.sp,
+                        text = "Lihat grafik lengkap di Analitik",
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = Color(0xFF0066FF),
                         modifier = Modifier.weight(1f)
@@ -948,7 +1204,7 @@ fun FinancialReportCardView(
                     Icon(
                         imageVector = Icons.Default.ChevronRight,
                         contentDescription = null,
-                        tint = Color(0xFF64748B),
+                        tint = Color(0xFF0066FF),
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -958,7 +1214,7 @@ fun FinancialReportCardView(
 }
 
 /**
- * Returns appropriate ImageVector for category spending
+ * Returns appropriate ImageVector for all 20 category types
  */
 fun getCategoryVectorIcon(iconType: String): ImageVector {
     return when (iconType) {
@@ -966,7 +1222,22 @@ fun getCategoryVectorIcon(iconType: String): ImageVector {
         "drink" -> Icons.Default.LocalCafe
         "transport" -> Icons.Default.DirectionsCar
         "entertainment" -> Icons.Default.SportsEsports
-        else -> Icons.Default.MoreHoriz
+        "housing" -> Icons.Default.Home
+        "bills" -> Icons.Default.Receipt
+        "phone" -> Icons.Default.PhoneAndroid
+        "subscription" -> Icons.Default.Star
+        "shopping" -> Icons.Default.ShoppingCart
+        "health" -> Icons.Default.LocalHospital
+        "tax" -> Icons.Default.AccountBalance
+        "debt_productive" -> Icons.Default.CreditCard
+        "debt_consumptive" -> Icons.Default.Payments
+        "charity" -> Icons.Default.Favorite
+        "self_care" -> Icons.Default.Face
+        "family" -> Icons.Default.People
+        "school" -> Icons.Default.School
+        "ewallet" -> Icons.Default.AccountBalanceWallet
+        "snack" -> Icons.Default.Fastfood
+        else -> Icons.Default.Category
     }
 }
 
