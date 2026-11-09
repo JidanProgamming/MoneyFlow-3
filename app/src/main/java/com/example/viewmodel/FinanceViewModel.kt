@@ -80,7 +80,6 @@ class FinanceViewModel(
     private val _initialOther = MutableStateFlow(prefs.getFloat("initial_other", 0f).toDouble())
     val initialOther: StateFlow<Double> = _initialOther.asStateFlow()
 
-
     // Filter and search on history screen
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
@@ -126,7 +125,6 @@ class FinanceViewModel(
     fun setSelectedFilter(filter: String) {
         _selectedFilter.value = filter
     }
-
 
     private fun loadTransactionsForUser(userId: Int) {
         viewModelScope.launch {

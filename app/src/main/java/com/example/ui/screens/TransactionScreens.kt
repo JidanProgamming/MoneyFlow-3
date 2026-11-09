@@ -82,7 +82,6 @@ fun AddTransactionScreen(navController: NavController, financeViewModel: Finance
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-
             // Nominal Amount Input field
             Card(
                 modifier = Modifier.fillMaxWidth(),

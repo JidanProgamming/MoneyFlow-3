@@ -243,7 +243,6 @@ fun HistoryScreen(
                     }
                 }
 
-
                 // Delete All Button
                 IconButton(
                     onClick = { showConfirmDeleteAll = true },
@@ -379,7 +378,6 @@ fun HistoryScreen(
                 )
             }
         }
-
 
         // Summary Statistics Card for current filter
         if (filteredTransactions.isNotEmpty()) {
@@ -534,7 +532,6 @@ fun HistoryScreen(
             }
         }
     }
-
 }
 
 @Composable
@@ -542,7 +539,7 @@ fun HistoryItemCard(transaction: Transaction, onClick: () -> Unit) {
     val categoryIcon = getCategoryIcon(transaction.category)
     val colorAccent = if (transaction.type == "INCOME") SoftGreenSuccess else SoftRedDanger
 
-    val cleanNote = transaction.note
+    val displayNote = transaction.note
         .replace("[Suara]", "")
         .replace("[Struk]", "")
         .trim()
@@ -581,7 +578,7 @@ fun HistoryItemCard(transaction: Transaction, onClick: () -> Unit) {
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = cleanNote,
+                    text = displayNote,
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -595,20 +592,6 @@ fun HistoryItemCard(transaction: Transaction, onClick: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    // Category badge
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
-                    ) {
-                        Text(
-                            text = transaction.category,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
-
                     // Wallet badge
                     Surface(
                         shape = RoundedCornerShape(6.dp),

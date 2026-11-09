@@ -58,6 +58,7 @@ fun SettingsScreen(
     val initialOther by financeViewModel.initialOther.collectAsState()
 
 
+
     // Trigger toast alerts from UI message stream
     LaunchedEffect(key1 = true) {
         financeViewModel.uiMessage.collect { message ->

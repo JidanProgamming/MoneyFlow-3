@@ -43,17 +43,17 @@ fun MainContainer(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(72.dp)
+                    .height(68.dp)
                     .testTag("main_bottom_nav_container"),
                 color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 6.dp,
                 shadowElevation = 12.dp,
-                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 12.dp),
+                        .padding(horizontal = 8.dp),
                     horizontalArrangement = Arrangement.SpaceAround,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -110,6 +110,7 @@ fun MainContainer(
             }
         },
         floatingActionButton = {
+            // Floating Action Button (+) Tambah Transaksi
             FloatingActionButton(
                 onClick = { navController.navigate("add_transaction") },
                 containerColor = primaryBlue,
@@ -123,7 +124,7 @@ fun MainContainer(
                 Icon(
                     imageVector = Icons.Default.Add,
                     contentDescription = "Tambah Transaksi",
-                    modifier = Modifier.size(26.dp)
+                    modifier = Modifier.size(28.dp)
                 )
             }
         }
@@ -171,7 +172,7 @@ private fun BottomNavItem(
                 indication = null,
                 onClick = onClick
             )
-            .padding(horizontal = 6.dp, vertical = 6.dp)
+            .padding(horizontal = 6.dp, vertical = 4.dp)
             .testTag(testTag),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center

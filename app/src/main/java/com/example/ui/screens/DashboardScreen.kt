@@ -54,7 +54,6 @@ fun DashboardScreen(
     val currentUser by authViewModel.currentUser.collectAsState()
     val transactions by financeViewModel.transactions.collectAsState()
 
-
     val initialCash by financeViewModel.initialCash.collectAsState()
     val initialEWallet by financeViewModel.initialEWallet.collectAsState()
     val initialBca by financeViewModel.initialBca.collectAsState()
