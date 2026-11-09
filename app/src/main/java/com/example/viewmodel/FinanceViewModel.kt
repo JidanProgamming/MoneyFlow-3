@@ -80,15 +80,6 @@ class FinanceViewModel(
     private val _initialOther = MutableStateFlow(prefs.getFloat("initial_other", 0f).toDouble())
     val initialOther: StateFlow<Double> = _initialOther.asStateFlow()
 
-    // OpenRouter AI API configuration
-    private val _openRouterBaseUrl = MutableStateFlow(prefs.getString("openrouter_base_url", "https://openrouter.ai/api/v1") ?: "https://openrouter.ai/api/v1")
-    val openRouterBaseUrl: StateFlow<String> = _openRouterBaseUrl.asStateFlow()
-
-    private val _openRouterApiKey = MutableStateFlow(prefs.getString("openrouter_api_key", "") ?: "")
-    val openRouterApiKey: StateFlow<String> = _openRouterApiKey.asStateFlow()
-
-    private val _openRouterModel = MutableStateFlow(prefs.getString("openrouter_model", "google/gemini-2.0-flash-001") ?: "google/gemini-2.0-flash-001")
-    val openRouterModel: StateFlow<String> = _openRouterModel.asStateFlow()
 
     // Filter and search on history screen
     private val _searchQuery = MutableStateFlow("")
@@ -136,104 +127,6 @@ class FinanceViewModel(
         _selectedFilter.value = filter
     }
 
-    fun setOpenRouterConfig(baseUrl: String, apiKey: String, model: String) {
-        val trimmedUrl = baseUrl.trim()
-        val trimmedKey = apiKey.trim()
-        val trimmedModel = model.trim()
-
-        _openRouterBaseUrl.value = trimmedUrl
-        _openRouterApiKey.value = trimmedKey
-        _openRouterModel.value = trimmedModel
-
-        prefs.edit()
-            .putString("openrouter_base_url", trimmedUrl)
-            .putString("openrouter_api_key", trimmedKey)
-            .putString("openrouter_model", trimmedModel)
-            .apply()
-
-        viewModelScope.launch {
-            _uiMessage.emit("Konfigurasi OpenRouter AI berhasil disimpan!")
-        }
-    }
-
-    fun buildDatabaseContextForAi(): String {
-        val allTrans = _transactions.value
-        val totalIncome = allTrans.filter { it.type == "INCOME" }.sumOf { it.amount }
-        val totalExpense = allTrans.filter { it.type == "EXPENSE" }.sumOf { it.amount }
-        val totalBalance = totalIncome - totalExpense
-
-        // Calculate balances per wallet
-        fun getWalletBalance(walletName: String, initial: Double): Double {
-            val inc = allTrans.filter { it.walletAccount.equals(walletName, ignoreCase = true) && it.type == "INCOME" }.sumOf { it.amount }
-            val exp = allTrans.filter { it.walletAccount.equals(walletName, ignoreCase = true) && it.type == "EXPENSE" }.sumOf { it.amount }
-            return initial + inc - exp
-        }
-
-        val balCash = getWalletBalance("Tunai", _initialCash.value)
-        val balEWallet = getWalletBalance("E-Wallet", _initialEWallet.value)
-        val balBca = getWalletBalance("BCA", _initialBca.value)
-        val balBri = getWalletBalance("BRI", _initialBri.value)
-        val balDanamon = getWalletBalance("Danamon", _initialDanamon.value)
-        val balOther = getWalletBalance("Lainnya", _initialOther.value)
-
-        // Category breakdown for expenses
-        val expenseByCategory = allTrans.filter { it.type == "EXPENSE" }
-            .groupBy { it.category }
-            .mapValues { entry -> entry.value.sumOf { it.amount } }
-            .toList()
-            .sortedByDescending { it.second }
-            .take(5)
-
-        val categorySummary = if (expenseByCategory.isEmpty()) "Belum ada pengeluaran" else {
-            expenseByCategory.joinToString(", ") { "${it.first}: Rp ${String.format("%,.0f", it.second)}" }
-        }
-
-        // 50/30/20 breakdown
-        val needsCategories = setOf("Makanan", "Transportasi", "Tagihan Rutin", "Kesehatan", "Tempat Tinggal", "Pajak", "Kebutuhan Sekolah")
-        val wantsCategories = setOf("Belanja(Shopping)", "Hiburan", "Minuman", "Jajan", "Perawatan Diri", "Langganan")
-        val savingsCategories = setOf("Cicilan/Hutang(Produktif)", "Zakat & Sedekah")
-
-        val needsTotal = allTrans.filter { it.type == "EXPENSE" && it.category in needsCategories }.sumOf { it.amount }
-        val wantsTotal = allTrans.filter { it.type == "EXPENSE" && it.category in wantsCategories }.sumOf { it.amount }
-        val savingsTotal = allTrans.filter { it.type == "EXPENSE" && it.category in savingsCategories }.sumOf { it.amount }
-
-        // Recent 5 transactions
-        val recentList = allTrans.take(5).joinToString("\n") { t ->
-            val dStr = java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault()).format(java.util.Date(t.date))
-            "- [${t.type}] Rp ${String.format("%,.0f", t.amount)} (${t.category}, ${t.walletAccount}) - ${t.note} ($dStr)"
-        }
-
-        return """
-            Ringkasan Keuangan Pengguna Saat Ini:
-            - Total Pemasukan: Rp ${String.format("%,.0f", totalIncome)}
-            - Total Pengeluaran: Rp ${String.format("%,.0f", totalExpense)}
-            - Sisa Saldo Bersih: Rp ${String.format("%,.0f", totalBalance)}
-            
-            Saldo per Dompet / Rekening:
-            - Tunai: Rp ${String.format("%,.0f", balCash)}
-            - E-Wallet: Rp ${String.format("%,.0f", balEWallet)}
-            - Bank BCA: Rp ${String.format("%,.0f", balBca)}
-            - Bank BRI: Rp ${String.format("%,.0f", balBri)}
-            - Bank Danamon: Rp ${String.format("%,.0f", balDanamon)}
-            - Rekening Lainnya: Rp ${String.format("%,.0f", balOther)}
-
-            Alokasi Aturan 50/30/20:
-            - Kebutuhan (Needs - 50%): Rp ${String.format("%,.0f", needsTotal)}
-            - Keinginan (Wants - 30%): Rp ${String.format("%,.0f", wantsTotal)}
-            - Tabungan & Investasi (Savings - 20%): Rp ${String.format("%,.0f", savingsTotal)}
-
-            Portofolio Tambahan:
-            - Hutang Saya: Rp ${String.format("%,.0f", _myDebt.value)}
-            - Piutang Orang: Rp ${String.format("%,.0f", _receivables.value)}
-            - Nilai Aset Emas: Rp ${String.format("%,.0f", _goldValue.value)}
-
-            Top 5 Kategori Pengeluaran:
-            $categorySummary
-
-            5 Transaksi Terakhir:
-            ${if (recentList.isBlank()) "(Belum ada transaksi)" else recentList}
-        """.trimIndent()
-    }
 
     private fun loadTransactionsForUser(userId: Int) {
         viewModelScope.launch {

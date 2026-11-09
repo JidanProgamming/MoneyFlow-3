@@ -5,6 +5,8 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -86,9 +88,11 @@ fun SplashScreen(navController: NavController, authViewModel: AuthViewModel) {
                 modifier = Modifier.scale(scale.value)
             ) {
                 Image(
-                    painter = painterResource(id = R.drawable.ic_moneyflow_logo),
-                    contentDescription = "Logo",
-                    modifier = Modifier.size(96.dp)
+                    painter = painterResource(id = R.drawable.moneyflow_logo),
+                    contentDescription = "Logo MoneyFlow",
+                    modifier = Modifier
+                        .size(100.dp)
+                        .clip(RoundedCornerShape(26.dp))
                 )
                 
                 Spacer(modifier = Modifier.height(20.dp))
