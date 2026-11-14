@@ -370,7 +370,7 @@ fun AnalyticsScreen(financeViewModel: FinanceViewModel) {
             }
         }
 
-        // Smart AI Insight Card
+        // Ringkasan & Rekomendasi Keuangan Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),

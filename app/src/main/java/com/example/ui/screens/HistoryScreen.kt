@@ -5,11 +5,9 @@ import android.content.Intent
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -30,8 +28,6 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import androidx.navigation.NavController
 import com.example.data.model.Transaction
-import com.example.ui.components.ReceiptScanDialog
-import com.example.ui.components.VoiceInputDialog
 import com.example.ui.theme.SoftGreenSuccess
 import com.example.ui.theme.SoftRedDanger
 import com.example.utils.ExportUtils
@@ -55,11 +51,8 @@ fun HistoryScreen(
     val selectedFilter by financeViewModel.selectedFilter.collectAsState()
 
     var selectedHistoryTab by remember { mutableStateOf(0) } // 0 = Semua, 1 = Pemasukan, 2 = Pengeluaran
-    var selectedSourceFilter by remember { mutableStateOf("Semua") } // "Semua", "Suara", "Struk", "Manual"
     var showConfirmDeleteAll by remember { mutableStateOf(false) }
     var showExportMenu by remember { mutableStateOf(false) }
-    var showScanDialog by remember { mutableStateOf(false) }
-    var showVoiceDialog by remember { mutableStateOf(false) }
 
     // Helper to format date headers for grouped transactions
     fun getDateHeader(timestamp: Long): String {
@@ -81,7 +74,7 @@ fun HistoryScreen(
     }
 
     // Interactive Filter logic supporting Harian, Mingguan, Bulanan, and Semua
-    val filteredTransactions = remember(transactions, searchQuery, selectedFilter, selectedHistoryTab, selectedSourceFilter) {
+    val filteredTransactions = remember(transactions, searchQuery, selectedFilter, selectedHistoryTab) {
         val now = System.currentTimeMillis()
 
         // Exact date boundaries for Harian, Mingguan, Bulanan
@@ -125,14 +118,7 @@ fun HistoryScreen(
             val matchesSearch = item.note.contains(searchQuery, ignoreCase = true) ||
                     item.category.contains(searchQuery, ignoreCase = true)
 
-            val matchesSource = when (selectedSourceFilter) {
-                "Suara" -> item.note.contains("[Suara]")
-                "Struk" -> item.note.contains("[Struk]")
-                "Manual" -> !item.note.contains("[Suara]") && !item.note.contains("[Struk]")
-                else -> true
-            }
-
-            matchesTime && matchesSearch && matchesSource
+            matchesTime && matchesSearch
         }
 
         when (selectedHistoryTab) {
@@ -255,30 +241,6 @@ fun HistoryScreen(
                     }
                 }
 
-                // Camera / Scan Receipt Button
-                IconButton(
-                    onClick = { showScanDialog = true },
-                    modifier = Modifier.testTag("scan_receipt_history_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.CenterFocusWeak,
-                        contentDescription = "Pindai Struk / Bukti Bayar",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-
-                // Voice Over Button
-                IconButton(
-                    onClick = { showVoiceDialog = true },
-                    modifier = Modifier.testTag("voice_input_history_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Mic,
-                        contentDescription = "Catat dengan Suara (Voice Over)",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-
                 // Delete All Button
                 IconButton(
                     onClick = { showConfirmDeleteAll = true },
@@ -297,7 +259,7 @@ fun HistoryScreen(
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { financeViewModel.setSearchQuery(it) },
-            placeholder = { Text("Cari catatan, kategori, atau struk...", fontSize = 13.sp) },
+            placeholder = { Text("Cari catatan atau kategori...", fontSize = 13.sp) },
             leadingIcon = {
                 Icon(
                     Icons.Default.Search,
@@ -411,36 +373,6 @@ fun HistoryScreen(
                     ),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.weight(1f)
-                )
-            }
-        }
-
-        // 2. Source Filter Chips: Semua Sumber, Suara, Struk, Manual
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(bottom = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            val sourceOptions = listOf(
-                "Semua" to "Semua Sumber",
-                "Suara" to "🎙️ Suara",
-                "Struk" to "🧾 Struk",
-                "Manual" to "✏️ Manual"
-            )
-
-            sourceOptions.forEach { (key, label) ->
-                val isSelected = selectedSourceFilter == key
-                FilterChip(
-                    selected = isSelected,
-                    onClick = { selectedSourceFilter = key },
-                    label = { Text(label, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = Color(0xFF0066FF).copy(alpha = 0.15f),
-                        selectedLabelColor = Color(0xFF0066FF)
-                    ),
-                    shape = RoundedCornerShape(10.dp)
                 )
             }
         }
@@ -598,33 +530,13 @@ fun HistoryScreen(
             }
         }
     }
-
-    ReceiptScanDialog(
-        isOpen = showScanDialog,
-        onDismiss = { showScanDialog = false },
-        financeViewModel = financeViewModel
-    )
-
-    VoiceInputDialog(
-        isOpen = showVoiceDialog,
-        onDismiss = { showVoiceDialog = false },
-        financeViewModel = financeViewModel
-    )
 }
 
 @Composable
 fun HistoryItemCard(transaction: Transaction, onClick: () -> Unit) {
     val categoryIcon = getCategoryIcon(transaction.category)
     val colorAccent = if (transaction.type == "INCOME") SoftGreenSuccess else SoftRedDanger
-
-    // Detect Source Badge
-    val isVoice = transaction.note.contains("[Suara]")
-    val isReceipt = transaction.note.contains("[Struk]")
-    val cleanNote = transaction.note
-        .replace("[Suara]", "")
-        .replace("[Struk]", "")
-        .trim()
-        .ifBlank { transaction.category }
+    val displayTitle = transaction.note.ifBlank { transaction.category }
 
     Card(
         modifier = Modifier
@@ -659,7 +571,7 @@ fun HistoryItemCard(transaction: Transaction, onClick: () -> Unit) {
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = cleanNote,
+                    text = displayTitle,
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -673,28 +585,16 @@ fun HistoryItemCard(transaction: Transaction, onClick: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    // Source Input Badge
+                    // Category badge
                     Surface(
                         shape = RoundedCornerShape(6.dp),
-                        color = when {
-                            isVoice -> Color(0xFFE0E7FF)
-                            isReceipt -> Color(0xFFEDE9FE)
-                            else -> MaterialTheme.colorScheme.surfaceVariant
-                        }
+                        color = colorAccent.copy(alpha = 0.12f)
                     ) {
                         Text(
-                            text = when {
-                                isVoice -> "🎙️ Suara"
-                                isReceipt -> "🧾 Struk"
-                                else -> "✏️ Manual"
-                            },
+                            text = transaction.category,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            color = when {
-                                isVoice -> Color(0xFF3730A3)
-                                isReceipt -> Color(0xFF6B21A8)
-                                else -> MaterialTheme.colorScheme.onSurfaceVariant
-                            },
+                            color = colorAccent,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }

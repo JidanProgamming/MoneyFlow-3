@@ -1,6 +1,6 @@
 {
   "name": "MoneyFlow",
-  "description": "A startup-ready personal finance app with statistics, Room persistence, and a modern clean UI.",
+  "description": "A personal finance app with manual income and expense tracking, multi-wallet balances, history, analytics, and Room persistence.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
