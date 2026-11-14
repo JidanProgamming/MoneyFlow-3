@@ -1,6 +1,6 @@
 # MoneyFlow - Aplikasi Pengelolaan Keuangan Pribadi Android
 
-[![Build Debug APK](https://github.com/ecotech982/MoneyFlow-2/actions/workflows/build-apk.yml/badge.svg)](https://github.com/ecotech982/MoneyFlow-2/actions/workflows/build-apk.yml)
+[![Build Debug APK](https://github.com/JidanProgamming/MoneyFlow-3/actions/workflows/build-apk.yml/badge.svg)](https://github.com/JidanProgamming/MoneyFlow-3/actions/workflows/build-apk.yml)
 
 Aplikasi manajemen keuangan pribadi modern untuk Android yang dibangun menggunakan **Kotlin**, **Jetpack Compose (Material 3)**, dan **Room Database** (penyimpanan lokal cepat dan aman). Dilengkapi dengan pencatatan pemasukan dan pengeluaran manual, analitik anggaran (Aturan 50/30/20), multi-dompet/rekening bank, riwayat transaksi, serta ekspor laporan Excel/CSV.
 
@@ -10,8 +10,8 @@ Aplikasi manajemen keuangan pribadi modern untuk Android yang dibangun menggunak
 
 Setelah repository di-push ke GitHub, GitHub Actions akan otomatis mem-build APK debug terbaru:
 
-- **Download APK Terbaru:** [app-debug.apk](https://github.com/ecotech982/MoneyFlow-2/releases/latest/download/app-debug.apk)
-- **Halaman Releases:** [GitHub Releases `ecotech982/MoneyFlow-2`](https://github.com/ecotech982/MoneyFlow-2/releases)
+- **Download APK Terbaru:** [app-debug.apk](https://github.com/JidanProgamming/MoneyFlow-3/releases/latest/download/app-debug.apk)
+- **Halaman Releases:** [GitHub Releases `JidanProgamming/MoneyFlow-3`](https://github.com/JidanProgamming/MoneyFlow-3/releases)
 - **File APK Lokal di Proyek:** Folder `APK DOWNLOAD/app-debug.apk`
 
 ---

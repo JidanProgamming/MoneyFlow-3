@@ -172,7 +172,7 @@ fun AuthScreen(
                 color = Color.White
             ) {
                 Image(
-                    painter = painterResource(id = R.drawable.moneyflow_logo),
+                    painter = painterResource(id = R.drawable.ic_moneyflow_logo),
                     contentDescription = "Logo MoneyFlow",
                     modifier = Modifier
                         .fillMaxSize()

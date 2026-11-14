@@ -88,7 +88,7 @@ fun SplashScreen(navController: NavController, authViewModel: AuthViewModel) {
                 modifier = Modifier.scale(scale.value)
             ) {
                 Image(
-                    painter = painterResource(id = R.drawable.moneyflow_logo),
+                    painter = painterResource(id = R.drawable.ic_moneyflow_logo),
                     contentDescription = "Logo MoneyFlow",
                     modifier = Modifier
                         .size(100.dp)
