@@ -34,6 +34,8 @@ import com.example.data.model.Transaction
 import com.example.ui.theme.SoftGreenSuccess
 import com.example.ui.theme.SoftRedDanger
 import com.example.utils.FormatUtils
+import com.example.ui.components.ReceiptScanDialog
+import com.example.ui.components.VoiceInputDialog
 import com.example.viewmodel.FinanceViewModel
 import java.text.SimpleDateFormat
 import java.util.*
@@ -50,6 +52,8 @@ fun AddTransactionScreen(navController: NavController, financeViewModel: Finance
     var selectedDate by remember { mutableStateOf(System.currentTimeMillis()) }
     var selectedWallet by remember { mutableStateOf("Tunai") }
     var customBankName by remember { mutableStateOf("") }
+    var showScanDialog by remember { mutableStateOf(false) }
+    var showVoiceDialog by remember { mutableStateOf(false) }
 
     val categories = listOf(
         "Tempat Tinggal", "Tagihan Rutin", "Pulsa/Data", "Langganan", 
@@ -82,6 +86,38 @@ fun AddTransactionScreen(navController: NavController, financeViewModel: Finance
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // Quick Smart Action Buttons (Pindai Struk OCR & Voice Over)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { showScanDialog = true },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(46.dp)
+                        .testTag("scan_receipt_in_add_screen"),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Pindai Struk", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+
+                OutlinedButton(
+                    onClick = { showVoiceDialog = true },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(46.dp)
+                        .testTag("voice_input_in_add_screen"),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Voice Over", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
             // Nominal Amount Input field
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -488,6 +524,24 @@ fun AddTransactionScreen(navController: NavController, financeViewModel: Finance
             }
         }
     }
+
+    ReceiptScanDialog(
+        isOpen = showScanDialog,
+        onDismiss = { showScanDialog = false },
+        financeViewModel = financeViewModel,
+        onTransactionSaved = {
+            navController.popBackStack()
+        }
+    )
+
+    VoiceInputDialog(
+        isOpen = showVoiceDialog,
+        onDismiss = { showVoiceDialog = false },
+        financeViewModel = financeViewModel,
+        onTransactionSaved = {
+            navController.popBackStack()
+        }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

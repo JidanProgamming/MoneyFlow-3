@@ -42,6 +42,8 @@ import com.example.viewmodel.AuthViewModel
 import com.example.viewmodel.FinanceViewModel
 import androidx.compose.ui.res.painterResource
 import com.example.R
+import com.example.ui.components.ReceiptScanDialog
+import com.example.ui.components.VoiceInputDialog
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -53,6 +55,9 @@ fun DashboardScreen(
 ) {
     val currentUser by authViewModel.currentUser.collectAsState()
     val transactions by financeViewModel.transactions.collectAsState()
+
+    var showScanReceiptDialog by remember { mutableStateOf(false) }
+    var showVoiceInputDialog by remember { mutableStateOf(false) }
 
     val initialCash by financeViewModel.initialCash.collectAsState()
     val initialEWallet by financeViewModel.initialEWallet.collectAsState()
@@ -618,6 +623,18 @@ fun DashboardScreen(
             }
         }
     }
+
+    ReceiptScanDialog(
+        isOpen = showScanReceiptDialog,
+        onDismiss = { showScanReceiptDialog = false },
+        financeViewModel = financeViewModel
+    )
+
+    VoiceInputDialog(
+        isOpen = showVoiceInputDialog,
+        onDismiss = { showVoiceInputDialog = false },
+        financeViewModel = financeViewModel
+    )
 }
 
 @Composable

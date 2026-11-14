@@ -57,7 +57,14 @@ fun SettingsScreen(
     val initialDanamon by financeViewModel.initialDanamon.collectAsState()
     val initialOther by financeViewModel.initialOther.collectAsState()
 
+    val openRouterBaseUrl by financeViewModel.openRouterBaseUrl.collectAsState()
+    val openRouterApiKey by financeViewModel.openRouterApiKey.collectAsState()
+    val openRouterModel by financeViewModel.openRouterModel.collectAsState()
 
+    var inputBaseUrl by remember(openRouterBaseUrl) { mutableStateOf(openRouterBaseUrl) }
+    var inputApiKey by remember(openRouterApiKey) { mutableStateOf(openRouterApiKey) }
+    var inputModel by remember(openRouterModel) { mutableStateOf(openRouterModel) }
+    var isApiKeyVisible by remember { mutableStateOf(false) }
 
     // Trigger toast alerts from UI message stream
     LaunchedEffect(key1 = true) {
@@ -271,6 +278,165 @@ fun SettingsScreen(
                 }
             }
         )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // OpenRouter Custom AI API Configuration Section
+        SettingSectionHeader(title = "KONEKSI AI OPENROUTER (CUSTOM API)")
+
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Kecerdasan Buatan (OpenRouter AI)",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (openRouterApiKey.isNotBlank()) "Status: Terhubung & Aktif" else "Status: Mode Lokal (Kunci belum diisi)",
+                                fontSize = 10.sp,
+                                color = if (openRouterApiKey.isNotBlank()) SoftGreenSuccess else MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "Digunakan untuk Scan Struk OCR, Voice Over pencatatan suara, dan Asisten AI Keuangan di kolom Chat.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Base URL
+                OutlinedTextField(
+                    value = inputBaseUrl,
+                    onValueChange = { inputBaseUrl = it },
+                    label = { Text("Base URL API") },
+                    placeholder = { Text("https://openrouter.ai/api/v1") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // API Key
+                OutlinedTextField(
+                    value = inputApiKey,
+                    onValueChange = { inputApiKey = it },
+                    label = { Text("OpenRouter API Key (sk-or-v1-...)") },
+                    placeholder = { Text("Masukkan API Key OpenRouter") },
+                    singleLine = true,
+                    visualTransformation = if (isApiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { isApiKeyVisible = !isApiKeyVisible }) {
+                            Icon(
+                                imageVector = if (isApiKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = if (isApiKeyVisible) "Sembunyikan" else "Tampilkan"
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Model Selection
+                OutlinedTextField(
+                    value = inputModel,
+                    onValueChange = { inputModel = it },
+                    label = { Text("Model AI Chat & Vision (https://openrouter.ai/models)") },
+                    placeholder = { Text("google/gemini-2.0-flash-001") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Quick model selector chips
+                Text("Pilihan Model Cepat:", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                val quickModels = listOf(
+                    "google/gemini-2.0-flash-001",
+                    "openai/gpt-4o-mini",
+                    "meta-llama/llama-3.3-70b-instruct:free",
+                    "deepseek/deepseek-chat"
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    quickModels.forEach { m ->
+                        FilterChip(
+                            selected = inputModel == m,
+                            onClick = { inputModel = m },
+                            label = { Text(m.substringAfter("/"), fontSize = 10.sp) },
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Button(
+                    onClick = {
+                        financeViewModel.setOpenRouterConfig(
+                            baseUrl = inputBaseUrl.ifBlank { "https://openrouter.ai/api/v1" },
+                            apiKey = inputApiKey,
+                            model = inputModel.ifBlank { "google/gemini-2.0-flash-001" }
+                        )
+                        Toast.makeText(context, "Konfigurasi OpenRouter berhasil disimpan!", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .testTag("btn_save_openrouter_settings"),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Simpan Konfigurasi AI", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(24.dp))
 
